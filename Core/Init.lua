@@ -34,6 +34,48 @@ function MMO:OnLoad()
         end
     end
 
+    -- Add button to the ESC Game Menu
+    self:HookGameMenu()
+
     self.isLoaded = true
     print("|cff00ccff[MacroPlus]|r v0.1.0 loaded.")
+end
+
+function MMO:HookGameMenu()
+    local menuBtn = CreateFrame("Button", "MacroPlusGameMenuButton", GameMenuFrame, "GameMenuButtonTemplate")
+    menuBtn:SetText("|cff00ccffMacroPlus|r")
+    menuBtn:SetScript("OnClick", function()
+        HideUIPanel(GameMenuFrame)
+        if self.ToggleUI then
+            self:ToggleUI()
+        end
+    end)
+
+    GameMenuFrame:HookScript("OnShow", function()
+        -- Find the lowest visible button in the menu to anchor below it
+        local lowestBtn, lowestY = nil, math.huge
+        for _, child in ipairs({GameMenuFrame:GetChildren()}) do
+            if child:IsObjectType("Button") and child ~= menuBtn and child:IsShown() and child:GetWidth() > 100 then
+                local _, _, _, _, y = child:GetPoint(1)
+                if y and y < lowestY then
+                    lowestY = y
+                    lowestBtn = child
+                end
+            end
+        end
+
+        -- Match size of an existing button
+        if lowestBtn then
+            menuBtn:SetSize(lowestBtn:GetWidth(), lowestBtn:GetHeight())
+        end
+
+        menuBtn:ClearAllPoints()
+        if lowestBtn then
+            menuBtn:SetPoint("TOP", lowestBtn, "BOTTOM", 0, -4)
+        else
+            menuBtn:SetPoint("BOTTOM", GameMenuFrame, "BOTTOM", 0, 18)
+        end
+
+        GameMenuFrame:SetHeight(GameMenuFrame:GetHeight() + menuBtn:GetHeight() + 8)
+    end)
 end

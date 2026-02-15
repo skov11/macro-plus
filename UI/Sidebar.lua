@@ -1,10 +1,24 @@
 local _, MMO = ...
 
-local selectedRealm = nil
-local selectedChar  = nil
+-- Collapse state tracking
+-- nil/absent = collapsed, true = expanded
+local collapsedRealms = {}  -- keyed by realm name
+local collapsedChars  = {}  -- keyed by realm..charName
+local sharedExpanded  = false
 
 -- ScrollFrame and content container
 local scrollFrame, scrollChild
+
+local function InitCollapseDefaults()
+    local currentRealm = GetRealmName()
+    local currentChar = UnitName("player")
+    if currentRealm then
+        collapsedRealms[currentRealm] = true  -- expand current realm
+        if currentChar then
+            collapsedChars[currentRealm .. currentChar] = true  -- expand current char
+        end
+    end
+end
 
 local function CreateSidebarUI(parent)
     -- ScrollFrame for the character list
@@ -17,6 +31,8 @@ local function CreateSidebarUI(parent)
     scrollFrame:SetScrollChild(scrollChild)
 
     MMO.sidebarScrollChild = scrollChild
+
+    InitCollapseDefaults()
 end
 
 local function ClearSidebar()
@@ -25,19 +41,6 @@ local function ClearSidebar()
         child:Hide()
         child:SetParent(nil)
     end
-end
-
-local function OnCharacterClick(realm, charName)
-    selectedRealm = realm
-    selectedChar  = charName
-
-    -- Refresh MacroGrid to show this character's macros (Phase 2)
-    if MMO.RefreshMacroGrid then
-        MMO:RefreshMacroGrid(realm, charName)
-    end
-
-    -- Re-render sidebar to update highlighting
-    MMO:RefreshSidebar()
 end
 
 local function CountMacrosByType(macros, isAccountFilter)
@@ -72,6 +75,35 @@ local function CreateMacroGridPlaceholder(parent, realm, charName, isAccountSect
     return gridHeight
 end
 
+local function CreateCollapseArrow(parent, isExpanded)
+    local arrow = parent:CreateTexture(nil, "ARTWORK")
+    arrow:SetSize(16, 16)
+    if isExpanded then
+        arrow:SetTexture("Interface\\Buttons\\UI-MinusButton-Up")
+    else
+        arrow:SetTexture("Interface\\Buttons\\UI-PlusButton-Up")
+    end
+    return arrow
+end
+
+local function CreateCollapsibleHeader(parent, text, color, isExpanded, yOffset, onClick)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(220, 24)
+    btn:SetPoint("TOPLEFT", 8, yOffset)
+
+    local arrow = CreateCollapseArrow(btn, isExpanded)
+    arrow:SetPoint("LEFT", 0, 0)
+
+    local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    label:SetPoint("LEFT", arrow, "RIGHT", 4, 0)
+    label:SetText(color .. text .. "|r")
+
+    btn:SetScript("OnClick", onClick)
+    btn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight", "ADD")
+
+    return btn
+end
+
 function MMO:RefreshSidebar()
     if not scrollChild then return end
     ClearSidebar()
@@ -79,116 +111,128 @@ function MMO:RefreshSidebar()
     MMO.macroGridFrames = {}
     local yOffset = -8
 
-    -- Add "Shared" section for account-wide macros at the top
     local currentRealm = GetRealmName()
     local currentChar = UnitName("player")
-    if currentRealm and currentChar then
-        local sharedLabel = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        sharedLabel:SetPoint("TOPLEFT", 8, yOffset)
-        sharedLabel:SetText("|cffffcc00Shared (Account-wide)|r")
-        yOffset = yOffset - 24
 
-        local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset)
-        yOffset = yOffset - (gridHeight + 16)
+    -- === Shared (Account-wide) section ===
+    if currentRealm and currentChar then
+        local isExpanded = sharedExpanded
+        CreateCollapsibleHeader(scrollChild, "Shared (Account-wide)", "|cffffcc00", isExpanded, yOffset, function()
+            sharedExpanded = not sharedExpanded
+            MMO:RefreshSidebar()
+        end)
+        yOffset = yOffset - 28
+
+        if isExpanded then
+            local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset)
+            yOffset = yOffset - (gridHeight + 16)
+        end
     end
 
+    -- === Realm sections ===
     local realms = self:GetAllRealms()
 
     for _, realm in ipairs(realms) do
-        -- Realm header
-        local realmLabel = scrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-        realmLabel:SetPoint("TOPLEFT", 8, yOffset)
-        realmLabel:SetText("|cff88ccff" .. realm .. "|r")
-        yOffset = yOffset - 24
+        local realmExpanded = collapsedRealms[realm] or false
 
-        local chars = self:GetCharactersForRealm(realm)
-
-        -- Sort so current character appears first
-        table.sort(chars, function(a, b)
-            local aIsCurrent = self:IsCurrentCharacter(realm, a)
-            local bIsCurrent = self:IsCurrentCharacter(realm, b)
-            if aIsCurrent ~= bIsCurrent then
-                return aIsCurrent  -- Current character first
-            end
-            return a < b  -- Alphabetical for others
+        -- Realm header (clickable, collapsible)
+        CreateCollapsibleHeader(scrollChild, realm, "|cff88ccff", realmExpanded, yOffset, function()
+            collapsedRealms[realm] = not collapsedRealms[realm]
+            MMO:RefreshSidebar()
         end)
+        yOffset = yOffset - 28
 
-        for _, charName in ipairs(chars) do
-            local isCurrent = self:IsCurrentCharacter(realm, charName)
-            local isSelected = (realm == selectedRealm and charName == selectedChar)
+        if realmExpanded then
+            local chars = self:GetCharactersForRealm(realm)
 
-            -- Character button
-            local btn = CreateFrame("Button", nil, scrollChild)
-            btn:SetSize(220, 24)
-            btn:SetPoint("TOPLEFT", 16, yOffset)
+            -- Sort so current character appears first
+            table.sort(chars, function(a, b)
+                local aIsCurrent = self:IsCurrentCharacter(realm, a)
+                local bIsCurrent = self:IsCurrentCharacter(realm, b)
+                if aIsCurrent ~= bIsCurrent then
+                    return aIsCurrent
+                end
+                return a < b
+            end)
 
-            local bg = btn:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            if isSelected then
-                bg:SetColorTexture(0.2, 0.4, 0.6, 0.5)
-            else
+            for _, charName in ipairs(chars) do
+                local isCurrent = self:IsCurrentCharacter(realm, charName)
+                local charKey = realm .. charName
+                local charExpanded = collapsedChars[charKey] or false
+
+                -- Character button
+                local btn = CreateFrame("Button", nil, scrollChild)
+                btn:SetSize(220, 30)
+                btn:SetPoint("TOPLEFT", 16, yOffset)
+
+                local bg = btn:CreateTexture(nil, "BACKGROUND")
+                bg:SetAllPoints()
                 bg:SetColorTexture(0, 0, 0, 0)
-            end
 
-            -- Get character metadata for class/faction icons
-            local metadata = self:GetCharacterMetadata(realm, charName)
-            local classFile = metadata.class or "warrior"
-            local faction = metadata.faction or "Neutral"
+                -- Collapse arrow (texture)
+                local arrow = CreateCollapseArrow(btn, charExpanded)
+                arrow:SetPoint("LEFT", 2, 0)
 
-            -- Faction icon
-            local factionIcon = btn:CreateTexture(nil, "ARTWORK")
-            factionIcon:SetSize(16, 16)
-            factionIcon:SetPoint("LEFT", 4, 0)
-            if faction == "Alliance" then
-                factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Alliance")
-            elseif faction == "Horde" then
-                factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Horde")
-            else
-                factionIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-                factionIcon:SetSize(12, 12)  -- Smaller for unknown
-            end
+                -- Get character metadata for class/faction icons
+                local metadata = self:GetCharacterMetadata(realm, charName)
+                local classFile = metadata.class or "warrior"
+                local faction = metadata.faction or "Neutral"
 
-            -- Class icon
-            local classIcon = btn:CreateTexture(nil, "ARTWORK")
-            classIcon:SetSize(16, 16)
-            classIcon:SetPoint("LEFT", factionIcon, "RIGHT", 2, 0)
-            classIcon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+                -- Faction icon (20x20)
+                local factionIcon = btn:CreateTexture(nil, "ARTWORK")
+                factionIcon:SetSize(20, 20)
+                factionIcon:SetPoint("LEFT", arrow, "RIGHT", 2, 0)
+                if faction == "Alliance" then
+                    factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Alliance")
+                elseif faction == "Horde" then
+                    factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Horde")
+                else
+                    factionIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                    factionIcon:SetSize(16, 16)
+                end
 
-            -- Set texture coordinates for class icon (using the class atlas coordinates)
-            local coords = CLASS_ICON_TCOORDS[strupper(classFile)]
-            if coords then
-                classIcon:SetTexCoord(unpack(coords))
-            end
+                -- Class icon (20x20)
+                local classIcon = btn:CreateTexture(nil, "ARTWORK")
+                classIcon:SetSize(20, 20)
+                classIcon:SetPoint("LEFT", factionIcon, "RIGHT", 2, 0)
+                classIcon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
 
-            local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            label:SetPoint("LEFT", classIcon, "RIGHT", 4, 0)
-            if isCurrent then
-                label:SetText("|cff00ff00" .. charName .. "|r (You)")
-            else
-                label:SetText(charName)
-            end
+                local coords = CLASS_ICON_TCOORDS[strupper(classFile)]
+                if coords then
+                    classIcon:SetTexCoord(unpack(coords))
+                end
 
-            btn:SetScript("OnClick", function()
-                OnCharacterClick(realm, charName)
-            end)
+                -- Character name (GameFontNormalLarge)
+                local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+                label:SetPoint("LEFT", classIcon, "RIGHT", 4, 0)
+                if isCurrent then
+                    label:SetText("|cff00ff00" .. charName .. "|r (You)")
+                else
+                    label:SetText(charName)
+                end
 
-            btn:SetScript("OnEnter", function(self)
-                if not isSelected then
+                -- Click toggles collapse
+                btn:SetScript("OnClick", function()
+                    collapsedChars[charKey] = not collapsedChars[charKey]
+                    MMO:RefreshSidebar()
+                end)
+
+                btn:SetScript("OnEnter", function(self)
                     bg:SetColorTexture(0.3, 0.3, 0.3, 0.3)
-                end
-            end)
+                end)
 
-            btn:SetScript("OnLeave", function(self)
-                if not isSelected then
+                btn:SetScript("OnLeave", function(self)
                     bg:SetColorTexture(0, 0, 0, 0)
+                end)
+
+                yOffset = yOffset - 34
+
+                -- MacroGrid for character-specific macros (only if expanded)
+                if charExpanded then
+                    local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset)
+                    yOffset = yOffset - (gridHeight + 8)
                 end
-            end)
-
-            yOffset = yOffset - 28
-
-            -- MacroGrid for character-specific macros only
-            local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset)
-            yOffset = yOffset - (gridHeight + 8)
+            end
         end
 
         yOffset = yOffset - 12

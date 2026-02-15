@@ -13,18 +13,25 @@ local function CreateMainFrame()
     f:SetFrameStrata("DIALOG")
     f:Hide()
 
-    -- Background
+    -- Main background: dark flat panel like Blizzard Options
     f:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        bgFile   = "Interface\\FrameGeneral\\UI-Background-Marble",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border",
         tile     = true,
-        tileSize = 32,
+        tileSize = 256,
         edgeSize = 32,
-        insets   = { left = 8, right = 8, top = 8, bottom = 8 },
+        insets   = { left = 5, right = 5, top = 5, bottom = 5 },
     })
-    f:SetBackdropColor(0, 0, 0, 0.9)
+    f:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
 
-    -- Title bar
+    -- Header bar background (dark strip across the top)
+    local headerBg = f:CreateTexture(nil, "ARTWORK")
+    headerBg:SetPoint("TOPLEFT", 4, -4)
+    headerBg:SetPoint("TOPRIGHT", -4, -4)
+    headerBg:SetHeight(44)
+    headerBg:SetColorTexture(0.05, 0.05, 0.05, 0.8)
+
+    -- Title text
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -16)
     title:SetText("|cff00ccffMacroPlus|r")
@@ -52,19 +59,45 @@ local function CreateMainFrame()
     resizeBtn:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
     resizeBtn:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
 
-    -- Layout regions (containers for Sidebar and Editor/Commands)
-    -- Sidebar: left panel, 250px wide
-    local sidebar = CreateFrame("Frame", "MacroPlusSidebar", f)
-    sidebar:SetPoint("TOPLEFT", 12, -50)
-    sidebar:SetPoint("BOTTOMLEFT", 12, 12)
+    -- Sidebar: left panel with inset look
+    local sidebar = CreateFrame("Frame", "MacroPlusSidebar", f, "BackdropTemplate")
+    sidebar:SetPoint("TOPLEFT", 10, -52)
+    sidebar:SetPoint("BOTTOMLEFT", 10, 10)
     sidebar:SetWidth(250)
+    sidebar:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile     = true,
+        tileSize = 16,
+        edgeSize = 16,
+        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    sidebar:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+    sidebar:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
     f.sidebar = sidebar
 
-    -- Content: right panel for Editor (top) and CommandPanel (bottom)
-    local content = CreateFrame("Frame", "MacroPlusContent", f)
-    content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 8, 0)
-    content:SetPoint("BOTTOMRIGHT", -12, 12)
+    -- Content: right panel with inset look
+    local content = CreateFrame("Frame", "MacroPlusContent", f, "BackdropTemplate")
+    content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 6, 0)
+    content:SetPoint("BOTTOMRIGHT", -10, 10)
+    content:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile     = true,
+        tileSize = 16,
+        edgeSize = 16,
+        insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    content:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
+    content:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
     f.content = content
+
+    -- Horizontal separator line below header
+    local sep = f:CreateTexture(nil, "ARTWORK")
+    sep:SetPoint("TOPLEFT", 10, -50)
+    sep:SetPoint("TOPRIGHT", -10, -50)
+    sep:SetHeight(1)
+    sep:SetColorTexture(0.6, 0.6, 0.6, 0.4)
 
     -- Combat lockdown listener: hide frame when entering combat
     MMO:RegisterCombatListener("MainFrame", function(inCombat)
