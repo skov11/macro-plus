@@ -17,8 +17,6 @@ A WoW addon (Interface: 120000 / Midnight) that replaces the default Macro UI wi
 
 ## UI Layout
 
-Based on `uilayout.jpeg`:
-
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  [Shared]          │  Macro Editor                       │
@@ -42,7 +40,7 @@ Based on `uilayout.jpeg`:
 
 ```
 macro-plus/
-├── MidnightMacroOverhaul.toc      ← Addon manifest
+├── MacroPlus.toc      ← Addon manifest
 ├── Core/
 │   ├── Init.lua                   ← Addon entry point, namespace setup
 │   ├── Database.lua               ← MMO_GlobalDB read/write accessors
@@ -81,10 +79,15 @@ macro-plus/
 
 ## Development Setup
 
-- Copy addon folder into `World of Warcraft/_retail_/Interface/AddOns/MidnightMacroOverhaul/`
-- Enable the addon from the WoW character select screen
-- Use `/reload` in-game to reload the UI after changes
-- Check `SavedVariables` at `WTF/Account/<ACCOUNT>/SavedVariables/MidnightMacroOverhaul.lua`
+1. Copy `.env-example` to `.env` and set `WOW_ADDONS_PATH` to your local WoW AddOns folder
+2. Run `./deploy.sh` to push addon files to WoW — this backs up the previous version first
+3. Enable **MacroPlus** from the WoW character select screen
+4. Use `/reload` in-game to reload the UI after changes
+5. Check `SavedVariables` at `WTF/Account/<ACCOUNT>/SavedVariables/MacroPlus.lua`
+
+### deploy.sh behaviour
+- On first run: creates `MacroPlus/` in your AddOns folder and copies files
+- On subsequent runs: backs up existing files to `MacroPlus/backups/<timestamp>/`, cleans the folder, then deploys fresh
 
 ## Common Commands
 
