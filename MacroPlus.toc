@@ -13,3 +13,5 @@ UI\MainFrame.lua
 UI\Sidebar.lua
 UI\MacroGrid.lua
 UI\SearchBar.lua
+UI\Editor.lua
+Engine\Sync.lua

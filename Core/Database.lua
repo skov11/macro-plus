@@ -11,6 +11,8 @@ local _, MMO = ...
 --       lastSeen = <unix timestamp>,
 --       class    = <class file name lowercase, e.g., "warrior">,
 --       faction  = <"Horde", "Alliance", or "Neutral">,
+--       race     = <race file name, e.g., "Human", "Orc", "NightElf">,
+--       sex      = <2 = male, 3 = female>,
 --     }
 --   }
 -- }
@@ -74,14 +76,22 @@ function MMO:SetCharacterMetadata(realm, charName, metadata)
     if metadata.faction then
         self.db[realm][charName].faction = metadata.faction
     end
+    if metadata.race then
+        self.db[realm][charName].race = metadata.race
+    end
+    if metadata.sex then
+        self.db[realm][charName].sex = metadata.sex
+    end
 end
 
--- Get character metadata (returns { class, faction })
+-- Get character metadata (returns { class, faction, race, sex })
 function MMO:GetCharacterMetadata(realm, charName)
     if self.db[realm] and self.db[realm][charName] then
         return {
             class = self.db[realm][charName].class,
             faction = self.db[realm][charName].faction,
+            race = self.db[realm][charName].race,
+            sex = self.db[realm][charName].sex,
         }
     end
     return {}

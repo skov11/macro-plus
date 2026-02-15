@@ -13,91 +13,81 @@ local function CreateMainFrame()
     f:SetFrameStrata("DIALOG")
     f:Hide()
 
-    -- Main background: dark flat panel like Blizzard Options
+    -- Main background: matches Blizzard Options panel
     f:SetBackdrop({
-        bgFile   = "Interface\\FrameGeneral\\UI-Background-Marble",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border",
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
         tile     = true,
-        tileSize = 256,
+        tileSize = 32,
         edgeSize = 32,
-        insets   = { left = 5, right = 5, top = 5, bottom = 5 },
+        insets   = { left = 11, right = 12, top = 12, bottom = 11 },
     })
-    f:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
 
-    -- Header bar background (dark strip across the top)
-    local headerBg = f:CreateTexture(nil, "ARTWORK")
-    headerBg:SetPoint("TOPLEFT", 4, -4)
-    headerBg:SetPoint("TOPRIGHT", -4, -4)
-    headerBg:SetHeight(44)
-    headerBg:SetColorTexture(0.05, 0.05, 0.05, 0.8)
-
-    -- Title text
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    -- ─── Title (Blizzard-style: centered text + separator line) ───────
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     title:SetPoint("TOP", 0, -16)
-    title:SetText("|cff00ccffMacroPlus|r")
+    title:SetText("MacroPlus")
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+    -- Thin separator line below title (like Blizzard Options)
+    local sep = f:CreateTexture(nil, "ARTWORK")
+    sep:SetPoint("TOPLEFT", 14, -38)
+    sep:SetPoint("TOPRIGHT", -14, -38)
+    sep:SetHeight(1)
+    sep:SetColorTexture(0.5, 0.5, 0.5, 0.6)
 
-    -- Make draggable from title area
+    -- Draggable title area
     local dragArea = CreateFrame("Frame", nil, f)
-    dragArea:SetPoint("TOPLEFT", 8, -8)
-    dragArea:SetPoint("TOPRIGHT", -8, -8)
-    dragArea:SetHeight(40)
+    dragArea:SetPoint("TOPLEFT", 12, -8)
+    dragArea:SetPoint("TOPRIGHT", -12, -8)
+    dragArea:SetHeight(30)
     dragArea:EnableMouse(true)
     dragArea:SetScript("OnMouseDown", function() f:StartMoving() end)
     dragArea:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
 
+    -- Close button (standard Blizzard X)
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetPoint("TOPRIGHT", -4, -4)
+
     -- Resize grip (bottom-right corner)
     local resizeBtn = CreateFrame("Button", nil, f)
     resizeBtn:SetSize(16, 16)
-    resizeBtn:SetPoint("BOTTOMRIGHT", -4, 4)
+    resizeBtn:SetPoint("BOTTOMRIGHT", -6, 6)
     resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
     resizeBtn:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
     resizeBtn:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
 
-    -- Sidebar: left panel with inset look
+    -- ─── Sidebar (left panel, subtle inset) ───────────────────────────
     local sidebar = CreateFrame("Frame", "MacroPlusSidebar", f, "BackdropTemplate")
-    sidebar:SetPoint("TOPLEFT", 10, -52)
-    sidebar:SetPoint("BOTTOMLEFT", 10, 10)
+    sidebar:SetPoint("TOPLEFT", 14, -44)
+    sidebar:SetPoint("BOTTOMLEFT", 14, 14)
     sidebar:SetWidth(250)
     sidebar:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile     = true,
-        tileSize = 16,
+        tileSize = 32,
         edgeSize = 16,
         insets   = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    sidebar:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    sidebar:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+    sidebar:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
     f.sidebar = sidebar
 
-    -- Content: right panel with inset look
+    -- ─── Content (right panel, subtle inset) ──────────────────────────
     local content = CreateFrame("Frame", "MacroPlusContent", f, "BackdropTemplate")
     content:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 6, 0)
-    content:SetPoint("BOTTOMRIGHT", -10, 10)
+    content:SetPoint("BOTTOMRIGHT", -14, 14)
     content:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile     = true,
-        tileSize = 16,
+        tileSize = 32,
         edgeSize = 16,
         insets   = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    content:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    content:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+    content:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.6)
     f.content = content
-
-    -- Horizontal separator line below header
-    local sep = f:CreateTexture(nil, "ARTWORK")
-    sep:SetPoint("TOPLEFT", 10, -50)
-    sep:SetPoint("TOPRIGHT", -10, -50)
-    sep:SetHeight(1)
-    sep:SetColorTexture(0.6, 0.6, 0.6, 0.4)
 
     -- Combat lockdown listener: hide frame when entering combat
     MMO:RegisterCombatListener("MainFrame", function(inCombat)

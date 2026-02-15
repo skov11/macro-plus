@@ -45,11 +45,15 @@ local function ScrapeCurrentCharacter()
     local _, className = UnitClass("player")  -- English class name (e.g., "WARRIOR", "MAGE")
     local faction = UnitFactionGroup("player") -- "Horde", "Alliance", or "Neutral"
     local classFile = className and className:lower() or "warrior"
+    local _, raceFile = UnitRace("player")     -- e.g., "Human", "Orc", "NightElf"
+    local sex = UnitSex("player")              -- 2 = male, 3 = female
 
     MMO:SetCharacterMacros(realm, charName, macros)
     MMO:SetCharacterMetadata(realm, charName, {
         class = classFile,
         faction = faction,
+        race = raceFile,
+        sex = sex,
     })
 end
 

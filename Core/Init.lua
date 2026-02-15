@@ -6,6 +6,19 @@ MacroPlus = MMO
 MMO.isLoaded  = false
 MMO.inCombat  = false
 
+-- Shared button border style: adds a 1px dark border around any button
+function MMO:StyleButton(btn)
+    local border = CreateFrame("Frame", nil, btn, "BackdropTemplate")
+    border:SetPoint("TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", 1, -1)
+    border:SetFrameLevel(btn:GetFrameLevel() - 1)
+    border:SetBackdrop({
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    border:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+end
+
 -- Central event frame for addon lifecycle
 MMO.eventFrame = CreateFrame("Frame")
 MMO.eventFrame:RegisterEvent("ADDON_LOADED")

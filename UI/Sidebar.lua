@@ -57,8 +57,8 @@ local function CreateMacroGridPlaceholder(parent, realm, charName, isAccountSect
     local macros = MMO:GetCharacterMacros(realm, charName)
     local macroCount = CountMacrosByType(macros, isAccountSection)
 
-    local numRows = math.max(math.ceil(macroCount / 6), 1)
-    local gridHeight = numRows * 36
+    local numRows = math.max(math.ceil(macroCount / 5), 1)
+    local gridHeight = numRows * 58  -- 54 cell height + 4 padding
 
     local gridFrame = CreateFrame("Frame", nil, parent)
     gridFrame:SetPoint("TOPLEFT", 16, yOffset)
@@ -84,6 +84,56 @@ local function CreateCollapseArrow(parent, isExpanded)
         arrow:SetTexture("Interface\\Buttons\\UI-PlusButton-Up")
     end
     return arrow
+end
+
+local MAX_ACCOUNT_MACROS   = 120
+local MAX_CHARACTER_MACROS = 18
+
+local function CreateNewMacroButton(parent, yOffset, isAccount)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(70, 20)
+    btn:SetPoint("TOPLEFT", 16, yOffset)
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:SetText("New")
+    btn:SetScript("OnClick", function()
+        if MMO.inCombat then
+            print("|cff00ccff[MacroPlus]|r Cannot create macros during combat.")
+            return
+        end
+
+        local numAccount, numCharacter = GetNumMacros()
+        if isAccount then
+            if numAccount >= MAX_ACCOUNT_MACROS then
+                print("|cff00ccff[MacroPlus]|r No free account macro slots (" .. numAccount .. "/" .. MAX_ACCOUNT_MACROS .. ").")
+                return
+            end
+        else
+            if numCharacter >= MAX_CHARACTER_MACROS then
+                print("|cff00ccff[MacroPlus]|r No free character macro slots (" .. numCharacter .. "/" .. MAX_CHARACTER_MACROS .. ").")
+                return
+            end
+        end
+
+        local perCharacter = not isAccount
+        local newIndex = CreateMacro("New", "INV_Misc_QuestionMark", "", perCharacter)
+        if newIndex then
+            MMO.ScrapeCurrentCharacter()
+            MMO:RefreshSidebar()
+
+            -- Load the new macro into the editor
+            local realm = GetRealmName()
+            local charName = UnitName("player")
+            local macros = MMO:GetCharacterMacros(realm, charName)
+            if macros[newIndex] and MMO.LoadMacroIntoEditor then
+                macros[newIndex]._realm = realm
+                macros[newIndex]._charName = charName
+                macros[newIndex]._index = newIndex
+                MMO:LoadMacroIntoEditor(macros[newIndex])
+            end
+        end
+    end)
+    MMO:StyleButton(btn)
+    return btn
 end
 
 local function CreateCollapsibleHeader(parent, text, color, isExpanded, yOffset, onClick)
@@ -114,16 +164,18 @@ function MMO:RefreshSidebar()
     local currentRealm = GetRealmName()
     local currentChar = UnitName("player")
 
-    -- === Shared (Account-wide) section ===
+    -- === General section ===
     if currentRealm and currentChar then
         local isExpanded = sharedExpanded
-        CreateCollapsibleHeader(scrollChild, "Shared (Account-wide)", "|cffffcc00", isExpanded, yOffset, function()
+        CreateCollapsibleHeader(scrollChild, "General", "|cffffcc00", isExpanded, yOffset, function()
             sharedExpanded = not sharedExpanded
             MMO:RefreshSidebar()
         end)
         yOffset = yOffset - 28
 
         if isExpanded then
+            CreateNewMacroButton(scrollChild, yOffset, true)
+            yOffset = yOffset - 28
             local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset)
             yOffset = yOffset - (gridHeight + 16)
         end
@@ -173,14 +225,16 @@ function MMO:RefreshSidebar()
                 local arrow = CreateCollapseArrow(btn, charExpanded)
                 arrow:SetPoint("LEFT", 2, 0)
 
-                -- Get character metadata for class/faction icons
+                -- Get character metadata for class/faction/race icons
                 local metadata = self:GetCharacterMetadata(realm, charName)
                 local classFile = metadata.class or "warrior"
                 local faction = metadata.faction or "Neutral"
+                local raceFile = metadata.race
+                local sex = metadata.sex or 2
 
-                -- Faction icon (20x20)
+                -- Faction icon (24x24)
                 local factionIcon = btn:CreateTexture(nil, "ARTWORK")
-                factionIcon:SetSize(20, 20)
+                factionIcon:SetSize(24, 24)
                 factionIcon:SetPoint("LEFT", arrow, "RIGHT", 2, 0)
                 if faction == "Alliance" then
                     factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Alliance")
@@ -188,13 +242,23 @@ function MMO:RefreshSidebar()
                     factionIcon:SetTexture("Interface\\FriendsFrame\\PlusManz-Horde")
                 else
                     factionIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-                    factionIcon:SetSize(16, 16)
                 end
 
-                -- Class icon (20x20)
+                -- Race icon (24x24)
+                local raceIcon = btn:CreateTexture(nil, "ARTWORK")
+                raceIcon:SetSize(24, 24)
+                raceIcon:SetPoint("LEFT", factionIcon, "RIGHT", 2, 0)
+                if raceFile then
+                    local gender = (sex == 3) and "female" or "male"
+                    raceIcon:SetAtlas("raceicon128-" .. raceFile:lower() .. "-" .. gender)
+                else
+                    raceIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                end
+
+                -- Class icon (24x24)
                 local classIcon = btn:CreateTexture(nil, "ARTWORK")
-                classIcon:SetSize(20, 20)
-                classIcon:SetPoint("LEFT", factionIcon, "RIGHT", 2, 0)
+                classIcon:SetSize(24, 24)
+                classIcon:SetPoint("LEFT", raceIcon, "RIGHT", 2, 0)
                 classIcon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
 
                 local coords = CLASS_ICON_TCOORDS[strupper(classFile)]
@@ -206,7 +270,7 @@ function MMO:RefreshSidebar()
                 local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
                 label:SetPoint("LEFT", classIcon, "RIGHT", 4, 0)
                 if isCurrent then
-                    label:SetText("|cff00ff00" .. charName .. "|r (You)")
+                    label:SetText("|cff00ff00" .. charName .. "|r")
                 else
                     label:SetText(charName)
                 end
@@ -229,13 +293,16 @@ function MMO:RefreshSidebar()
 
                 -- MacroGrid for character-specific macros (only if expanded)
                 if charExpanded then
+                    if isCurrent then
+                        CreateNewMacroButton(scrollChild, yOffset, false)
+                        yOffset = yOffset - 28
+                    end
                     local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset)
                     yOffset = yOffset - (gridHeight + 8)
                 end
             end
         end
 
-        yOffset = yOffset - 12
     end
 
     scrollChild:SetHeight(math.abs(yOffset) + 20)
@@ -254,8 +321,16 @@ function MMO:ToggleUI()
             CreateSidebarUI(mainFrame.sidebar)
             self:RefreshSidebar()
         end
+        -- Initialize editor in new-macro mode
+        if self.InitEditor then
+            self:InitEditor()
+        end
         -- Don't call orig again - we already toggled above and frame is now visible
         return
     end
     orig(self)  -- Normal toggle when everything is initialized
+    -- Ensure editor is initialized on subsequent opens
+    if self.InitEditor then
+        self:InitEditor()
+    end
 end
