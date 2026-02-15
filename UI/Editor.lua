@@ -21,56 +21,7 @@ local isReadOnly = false
 local isNewMacroMode = false
 local saveToAccount = true  -- true = General, false = Character
 
--- ─── Syntax Highlighting ───────────────────────────────────────────────
-
-local COLOR_COMMAND     = "|cff69ccf0"  -- blue
-local COLOR_CONDITIONAL = "|cffffd100"  -- yellow
-local COLOR_DIRECTIVE   = "|cff00ff00"  -- green
-local COLOR_DEFAULT     = "|cffffffff"  -- white
-local COLOR_RESET       = "|r"
-
-local function ColorizeLine(line)
-    if line:match("^#show") then
-        return COLOR_DIRECTIVE .. line .. COLOR_RESET
-    end
-
-    local result = ""
-    local pos = 1
-    local len = #line
-
-    while pos <= len do
-        if line:sub(pos, pos) == "/" then
-            local word = line:match("^(/[%a]+)", pos)
-            if word then
-                result = result .. COLOR_COMMAND .. word .. COLOR_RESET
-                pos = pos + #word
-            else
-                result = result .. line:sub(pos, pos)
-                pos = pos + 1
-            end
-        elseif line:sub(pos, pos) == "[" then
-            local bracket = line:match("^(%b[])", pos)
-            if bracket then
-                result = result .. COLOR_CONDITIONAL .. bracket .. COLOR_RESET
-                pos = pos + #bracket
-            else
-                result = result .. line:sub(pos, pos)
-                pos = pos + 1
-            end
-        else
-            local nextSpecial = line:find("[/%[]", pos + 1)
-            if nextSpecial then
-                result = result .. COLOR_DEFAULT .. line:sub(pos, nextSpecial - 1) .. COLOR_RESET
-                pos = nextSpecial
-            else
-                result = result .. COLOR_DEFAULT .. line:sub(pos) .. COLOR_RESET
-                break
-            end
-        end
-    end
-
-    return result
-end
+-- ─── Syntax Highlighting (uses Parser.lua's enhanced colorizer) ───────
 
 local function RefreshHighlight()
     if not editBox or not highlightOverlay then return end
@@ -78,9 +29,47 @@ local function RefreshHighlight()
     local lines = { strsplit("\n", text) }
     local colorized = {}
     for i, line in ipairs(lines) do
-        colorized[i] = ColorizeLine(line)
+        if MMO.ColorizeMacroLine then
+            colorized[i] = MMO:ColorizeMacroLine(line)
+        else
+            colorized[i] = line
+        end
     end
     highlightOverlay:SetText(table.concat(colorized, "\n"))
+end
+
+-- ─── Error Display ────────────────────────────────────────────────────
+
+local errorDisplay
+local parseTimer = nil
+local PARSE_DEBOUNCE = 0.3
+
+local function RefreshErrors()
+    if not editBox or not errorDisplay then return end
+    local text = editBox:GetText() or ""
+    if not MMO.ParseMacro then
+        errorDisplay:SetText("")
+        return
+    end
+
+    local errors, warnings = MMO:ParseMacro(text)
+    local lines = {}
+    for _, err in ipairs(errors) do
+        local prefix = err.line > 0 and ("L" .. err.line .. ": ") or ""
+        table.insert(lines, "|cffff4444" .. prefix .. err.msg .. "|r")
+    end
+    for _, warn in ipairs(warnings) do
+        local prefix = warn.line > 0 and ("L" .. warn.line .. ": ") or ""
+        table.insert(lines, "|cffffcc44" .. prefix .. warn.msg .. "|r")
+    end
+    errorDisplay:SetText(table.concat(lines, "\n"))
+end
+
+local function DebouncedParse()
+    if parseTimer then
+        parseTimer:Cancel()
+    end
+    parseTimer = C_Timer.NewTimer(PARSE_DEBOUNCE, RefreshErrors)
 end
 
 local function UpdateCharCounter()
@@ -421,9 +410,31 @@ end
 -- ─── Build Editor UI ───────────────────────────────────────────────────
 
 local function CreateEditorUI(parent)
+    -- Editor takes top 60% of content panel, command panel gets bottom 40%
     editorFrame = CreateFrame("Frame", "MacroPlusEditor", parent)
     editorFrame:SetPoint("TOPLEFT", 8, -8)
-    editorFrame:SetPoint("BOTTOMRIGHT", -8, 8)
+    editorFrame:SetPoint("RIGHT", -8, 0)
+    editorFrame:SetHeight(parent:GetHeight() * 0.6)
+
+    -- Separator between editor and command panel
+    local panelSep = parent:CreateTexture(nil, "ARTWORK")
+    panelSep:SetPoint("TOPLEFT", editorFrame, "BOTTOMLEFT", -4, -4)
+    panelSep:SetPoint("TOPRIGHT", editorFrame, "BOTTOMRIGHT", 4, -4)
+    panelSep:SetHeight(1)
+    panelSep:SetColorTexture(0.4, 0.4, 0.4, 0.6)
+
+    -- Command panel area below editor
+    local cmdPanelArea = CreateFrame("Frame", "MacroPlusCommandArea", parent)
+    cmdPanelArea:SetPoint("TOPLEFT", panelSep, "BOTTOMLEFT", 4, -2)
+    cmdPanelArea:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 8)
+
+    -- Resize editor when parent resizes
+    parent:SetScript("OnSizeChanged", function(self, w, h)
+        editorFrame:SetHeight(h * 0.6)
+    end)
+
+    -- Store for later initialization
+    parent.cmdPanelArea = cmdPanelArea
 
     -- === Header Row ===
     local header = CreateFrame("Frame", nil, editorFrame)
@@ -492,6 +503,43 @@ local function CreateEditorUI(parent)
     deleteBtn:SetText("Delete")
     deleteBtn:SetScript("OnClick", OnDelete)
     MMO:StyleButton(deleteBtn)
+
+    -- Condition Builder button
+    local condBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    condBtn:SetSize(90, 18)
+    condBtn:SetPoint("TOPLEFT", changeIconBtn, "TOPRIGHT", 6, 0)
+    condBtn:SetNormalFontObject(GameFontNormalSmall)
+    condBtn:SetHighlightFontObject(GameFontHighlightSmall)
+    condBtn:SetText("Conditions")
+    condBtn:SetScript("OnClick", function()
+        if MMO.ToggleConditionBuilder then
+            MMO:ToggleConditionBuilder()
+        end
+    end)
+    MMO:StyleButton(condBtn)
+
+    -- Shorten button
+    local shortenBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    shortenBtn:SetSize(80, 18)
+    shortenBtn:SetPoint("TOPLEFT", condBtn, "TOPRIGHT", 6, 0)
+    shortenBtn:SetNormalFontObject(GameFontNormalSmall)
+    shortenBtn:SetHighlightFontObject(GameFontHighlightSmall)
+    shortenBtn:SetText("Shorten")
+    shortenBtn:SetScript("OnClick", function()
+        if isReadOnly or MMO.inCombat then return end
+        if not MMO.ShortenMacro then return end
+        local oldText = editBox:GetText() or ""
+        local newText = MMO:ShortenMacro(oldText)
+        if newText ~= oldText then
+            local saved = #oldText - #newText
+            editBox:SetText(newText)
+            editBox:SetCursorPosition(0)
+            print("|cff00ccff[MacroPlus]|r Saved " .. saved .. " characters (" .. #oldText .. " → " .. #newText .. ")")
+        else
+            print("|cff00ccff[MacroPlus]|r Macro is already optimized.")
+        end
+    end)
+    MMO:StyleButton(shortenBtn)
 
     -- Copy button
     copyBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
@@ -642,11 +690,21 @@ local function CreateEditorUI(parent)
     editBox:SetScript("OnTextChanged", function(self, userInput)
         UpdateCharCounter()
         RefreshHighlight()
+        DebouncedParse()
     end)
 
     editBox:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
     end)
+
+    -- === Error Display ===
+    errorDisplay = editorFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    errorDisplay:SetPoint("BOTTOMLEFT", 0, 24)
+    errorDisplay:SetPoint("BOTTOMRIGHT", 0, 24)
+    errorDisplay:SetJustifyH("LEFT")
+    errorDisplay:SetJustifyV("BOTTOM")
+    errorDisplay:SetMaxLines(3)
+    errorDisplay:SetText("")
 
     -- === Footer Row ===
     local footer = CreateFrame("Frame", nil, editorFrame)
@@ -686,6 +744,11 @@ function MMO:InitEditor()
     -- Start in new macro mode if nothing is loaded
     if not currentMacro then
         EnterNewMacroMode()
+    end
+    -- Initialize command panel below editor
+    local content = _G["MacroPlusContent"]
+    if content and content.cmdPanelArea and self.InitCommandPanel then
+        self:InitCommandPanel(content.cmdPanelArea)
     end
 end
 

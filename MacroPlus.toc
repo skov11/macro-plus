@@ -15,3 +15,9 @@ UI\MacroGrid.lua
 UI\SearchBar.lua
 UI\Editor.lua
 Engine\Sync.lua
+Data\SlashCommands.lua
+Data\Conditions.lua
+Engine\Parser.lua
+Engine\Shortener.lua
+UI\CommandPanel.lua
+UI\ConditionBuilder.lua
