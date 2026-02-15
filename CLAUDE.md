@@ -61,12 +61,12 @@ macro-plus/
 
 ## Phase Plan
 
-| Phase | Files | Goal |
-|-------|-------|------|
-| 1 | TOC, Init, Database, Scraper, CombatLock | Data persists to WTF SavedVariables |
-| 2 | MainFrame, Sidebar, MacroGrid, SearchBar | Full UI shell visible in-game |
-| 3 | Editor, Sync | Live editing connected to `EditMacro` API |
-| 4 | SlashCommands, CommandPanel | Encyclopedia with insert-on-click |
+| Phase | Files | Goal | Status |
+|-------|-------|------|--------|
+| 1 | TOC, Init, Database, Scraper, CombatLock | Data persists to WTF SavedVariables | ✅ Complete |
+| 2 | MainFrame, Sidebar, MacroGrid, SearchBar | Full UI shell visible in-game | ✅ Complete |
+| 3 | Editor, Sync | Live editing connected to `EditMacro` API | Pending |
+| 4 | SlashCommands, CommandPanel | Encyclopedia with insert-on-click | Pending |
 
 ## Architecture Notes
 
@@ -75,7 +75,10 @@ macro-plus/
 - **Syntax highlighting**: A read-only `FontString` overlay rendered on top of the EditBox, refreshed on `OnTextChanged`. Highlights `/cast`, `/use`, `/target` and conditionals like `[help,nodead]` using color escape codes.
 - **Icon resolution**: Use `C_Spell.GetSpellTexture` and `C_Spell.GetOverrideSpell` instead of deprecated `GetSpellInfo`.
 - **Character counter**: Real-time `0/255` display tied to `OnTextChanged`; can be extended for "Extended Macro" support via secure action button swapping.
-- **Scraper fires on**: `PLAYER_LOGIN` and `UPDATE_MACROS`. Stores data as `MMO_GlobalDB[realm][charName][index] = { name, icon, body }`.
+- **Scraper fires on**: `PLAYER_LOGIN` and `UPDATE_MACROS`. Stores data as `MMO_GlobalDB[realm][charName][index] = { name, icon, body }`. Also captures character metadata (class, faction).
+- **Account vs Character macros**: UI displays "Shared (Account-wide)" section at top showing all account macros once. Each character section shows only their character-specific macros (filtered by `isAccount` flag).
+- **Character list sorting**: Current character always appears first in their realm, then alphabetically.
+- **Class/Faction icons**: Sidebar displays faction icon (Alliance/Horde) and class icon next to each character name using WoW's built-in icon assets.
 
 ## Development Setup
 
@@ -92,6 +95,6 @@ macro-plus/
 ## Common Commands
 
 ```
-/mmo          → Toggle the Macro Hub window
+/mp           → Toggle the Macro Hub window
 /reload       → Reload UI (in-game, for testing changes)
 ```

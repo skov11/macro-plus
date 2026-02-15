@@ -9,6 +9,8 @@ local _, MMO = ...
 --         [index] = { name, icon, body, isAccount }
 --       },
 --       lastSeen = <unix timestamp>,
+--       class    = <class file name lowercase, e.g., "warrior">,
+--       faction  = <"Horde", "Alliance", or "Neutral">,
 --     }
 --   }
 -- }
@@ -61,4 +63,26 @@ end
 -- Returns true if the given realm+charName matches the currently logged-in character
 function MMO:IsCurrentCharacter(realm, charName)
     return realm == GetRealmName() and charName == UnitName("player")
+end
+
+-- Set character metadata (class, faction)
+function MMO:SetCharacterMetadata(realm, charName, metadata)
+    EnsureCharEntry(realm, charName)
+    if metadata.class then
+        self.db[realm][charName].class = metadata.class
+    end
+    if metadata.faction then
+        self.db[realm][charName].faction = metadata.faction
+    end
+end
+
+-- Get character metadata (returns { class, faction })
+function MMO:GetCharacterMetadata(realm, charName)
+    if self.db[realm] and self.db[realm][charName] then
+        return {
+            class = self.db[realm][charName].class,
+            faction = self.db[realm][charName].faction,
+        }
+    end
+    return {}
 end

@@ -46,6 +46,7 @@ rsync -av \
   --exclude='deploy.sh' \
   --exclude='README.md' \
   --exclude='CLAUDE.md' \
+  --exclude='screenshots/' \
   ./ "$DEST/"
 
 echo "Done."

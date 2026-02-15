@@ -25,7 +25,7 @@ function MMO:OnLoad()
     self.db = MMO_GlobalDB
 
     -- Slash command — UI toggle hooked up in Phase 2
-    SLASH_MACROPLUS1 = "/mmo"
+    SLASH_MACROPLUS1 = "/mp"
     SlashCmdList["MACROPLUS"] = function(msg)
         if self.ToggleUI then
             self:ToggleUI()

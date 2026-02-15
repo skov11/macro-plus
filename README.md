@@ -7,8 +7,11 @@ A World of Warcraft addon for **Midnight (Interface: 120000)** that replaces the
 ## Features
 
 - **Cross-Character Library** — Browse and copy macros from all your alts, stored persistently across sessions via `SavedVariables`
-- **IDE-Style Editor** — Multi-line editor with simulated syntax highlighting for slash commands and conditionals, plus a real-time character counter
-- **Command Encyclopedia** — Searchable reference of every valid slash command in Midnight, with clickable insert buttons
+- **Account vs Character Separation** — Account-wide macros shown in "Shared" section at top, character-specific macros under each character
+- **Character Metadata** — Class and faction icons displayed next to each character name; current character always appears first
+- **Real-Time Search** — Filter macros by name or body text across all characters simultaneously
+- **IDE-Style Editor** — Multi-line editor with simulated syntax highlighting for slash commands and conditionals, plus a real-time character counter *(Phase 3)*
+- **Command Encyclopedia** — Searchable reference of every valid slash command in Midnight, with clickable insert buttons *(Phase 4)*
 - **Combat Safe** — All editing is automatically disabled during combat to prevent taint errors
 - **Midnight Compatible** — Uses `C_Spell` APIs and targets Interface `120000`
 
@@ -45,7 +48,7 @@ A World of Warcraft addon for **Midnight (Interface: 120000)** that replaces the
    ./deploy.sh
    ```
 4. Launch WoW and enable **MacroPlus** on the character select screen
-5. Log in and type `/mmo` to open the Macro Hub
+5. Log in and type `/mp` to open the Macro Hub
 
 > Each deploy automatically backs up the previous version to `MacroPlus/backups/<timestamp>/` before deploying.
 
@@ -55,7 +58,7 @@ A World of Warcraft addon for **Midnight (Interface: 120000)** that replaces the
 
 | Command | Action |
 |---------|--------|
-| `/mmo` | Toggle the Macro Hub window |
+| `/mp` | Toggle the Macro Hub window |
 
 - **Click a character** in the sidebar to browse their macros
 - **Click a macro icon** to load it into the editor

@@ -41,7 +41,16 @@ local function ScrapeCurrentCharacter()
         end
     end
 
+    -- Capture character metadata
+    local _, className = UnitClass("player")  -- English class name (e.g., "WARRIOR", "MAGE")
+    local faction = UnitFactionGroup("player") -- "Horde", "Alliance", or "Neutral"
+    local classFile = className and className:lower() or "warrior"
+
     MMO:SetCharacterMacros(realm, charName, macros)
+    MMO:SetCharacterMetadata(realm, charName, {
+        class = classFile,
+        faction = faction,
+    })
 end
 
 -- Expose so other modules (e.g. Sync) can trigger a re-scrape manually

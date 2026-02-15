@@ -9,3 +9,7 @@ Core\Init.lua
 Core\Database.lua
 Core\CombatLock.lua
 Engine\Scraper.lua
+UI\MainFrame.lua
+UI\Sidebar.lua
+UI\MacroGrid.lua
+UI\SearchBar.lua
