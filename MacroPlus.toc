@@ -1,0 +1,11 @@
+## Interface: 120000
+## Title: MacroPlus
+## Notes: Cross-character macro library with IDE-style editor and slash-command encyclopedia
+## Author: Big-Bro-Bot
+## Version: 0.1.0
+## SavedVariables: MMO_GlobalDB
+
+Core\Init.lua
+Core\Database.lua
+Core\CombatLock.lua
+Engine\Scraper.lua
