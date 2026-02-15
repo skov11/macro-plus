@@ -68,6 +68,96 @@ macro-plus/
 | 3 | Editor, Sync | Live editing connected to `EditMacro` API | Pending |
 | 4 | SlashCommands, CommandPanel | Encyclopedia with insert-on-click | Pending |
 
+---
+
+## Current Progress
+
+### ✅ Phase 1: Foundation (COMPLETE)
+**Files:** `MacroPlus.toc`, `Core/Init.lua`, `Core/Database.lua`, `Core/CombatLock.lua`, `Engine/Scraper.lua`
+
+**What's Working:**
+- Addon loads on startup via `/mp` command
+- Auto-scrapes all macros on `PLAYER_LOGIN` and `UPDATE_MACROS`
+- Stores macro data to `MMO_GlobalDB` (persists to disk at `WTF/Account/<ACCOUNT>/SavedVariables/MacroPlus.lua`)
+- Tracks both account-wide macros (indices 1-120) and character-specific macros (indices 121-138)
+- Captures character metadata: class and faction
+- Combat state tracking system ready for UI lockdown
+
+**Data Structure:**
+```lua
+MMO_GlobalDB[realm][charName] = {
+  macros = { [index] = { name, icon, body, isAccount } },
+  lastSeen = <timestamp>,
+  class = "warrior",
+  faction = "Horde"
+}
+```
+
+### ✅ Phase 2: UI Shell (COMPLETE)
+**Files:** `UI/MainFrame.lua`, `UI/Sidebar.lua`, `UI/MacroGrid.lua`, `UI/SearchBar.lua`
+
+**What's Working:**
+- `/mp` opens a 900×600 resizable window
+- Window auto-hides during combat (no taint risk)
+- Draggable title bar, resize grip at bottom-right
+- **Sidebar** (left panel):
+  - "Shared (Account-wide)" section at top showing all account macros once
+  - Characters grouped by realm
+  - Current character always appears first
+  - Faction icon (Alliance/Horde) + class icon next to each name
+  - Each character shows only their character-specific macros (6 per row, scrollable grid)
+- **Search bar** at top of sidebar:
+  - Real-time filter by macro name or body text
+  - Applies across all characters and grids simultaneously
+- **Macro icons** render in full color, clickable (Phase 3 will add editor load)
+
+**Important Notes:**
+- Each character must be logged in at least once and `/reload` to populate their data
+- Icons may show as question marks if character hasn't been logged in since metadata was added (fixed by logging in and `/reload` on that character)
+
+---
+
+### 🚧 Phase 3: Editor & Sync (NEXT)
+**Files to Build:** `UI/Editor.lua`, `Engine/Sync.lua`
+
+**Goals:**
+1. **Editor (right panel, top section):**
+   - Multi-line EditBox for macro editing
+   - Syntax highlighting overlay (simulated via FontString)
+   - Character counter (0/255 display, real-time)
+   - "Dry run" parser to validate commands
+   - Save button → calls `EditMacro()` for current character only
+   - Read-only mode for viewing alt macros
+
+2. **Sync Logic:**
+   - "Copy to Current Character" button
+   - Allows copying any alt's macro to the logged-in character
+   - Calls `CreateMacro()` or `EditMacro()` to write locally
+
+**Click Flow (to implement):**
+- Click macro icon in sidebar → loads into editor
+- If it's an alt macro → read-only mode
+- If it's current character macro → editable mode
+
+---
+
+### 🚧 Phase 4: Command Encyclopedia (FINAL)
+**Files to Build:** `Data/SlashCommands.lua`, `UI/CommandPanel.lua`
+
+**Goals:**
+1. **SlashCommands.lua:**
+   - Static Lua table with all Midnight slash commands
+   - Categories: Combat, Utility, Targeting, System, Housing, Sky-riding
+   - Each entry: `{ command, description, syntax }`
+
+2. **CommandPanel (right panel, bottom section):**
+   - Scrollable list of command buttons grouped by category
+   - Search filter box
+   - Hover → tooltip shows syntax and description
+   - Click button → inserts command at cursor in editor
+
+---
+
 ## Architecture Notes
 
 - **Combat Lockdown**: Use `PLAYER_REGEN_DISABLED` / `PLAYER_REGEN_ENABLED` events to disable/hide the editor and all macro-write operations. All UI is plain `Frame` (not SecureFrame) to avoid taint.
