@@ -21,7 +21,9 @@ Engine\Sync.lua
 Data\SlashCommands.lua
 Data\Conditions.lua
 Data\SpecialCommands.lua
+Data\ClassMacros.lua
 Engine\Parser.lua
 Engine\Shortener.lua
 UI\CommandPanel.lua
 UI\ConditionBuilder.lua
+UI\MacroLibrary.lua

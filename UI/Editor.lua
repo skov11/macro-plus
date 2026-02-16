@@ -11,7 +11,7 @@ local editBox, scrollFrame
 local highlightOverlay
 local charCounter
 local headerIcon, headerNameBox, changeIconBtn
-local saveBtn, deleteBtn, copyBtn, shareBtn
+local saveBtn, deleteBtn, copyBtn, shareBtn, libraryBtn
 local saveToDropdown, saveToLabel
 local statusText
 local iconPickerFrame
@@ -290,6 +290,7 @@ local function UpdateButtonStates()
         copyBtn:Disable()
         changeIconBtn:Disable()
         shareBtn:Disable()
+        if libraryBtn then libraryBtn:Disable() end
         return
     end
 
@@ -302,6 +303,7 @@ local function UpdateButtonStates()
         changeIconBtn:Enable()
         shareBtn:Enable()
     end
+    if libraryBtn then libraryBtn:Enable() end
 end
 
 -- ─── New Macro Mode ──────────────────────────────────────────────────
@@ -560,6 +562,20 @@ local function CreateEditorUI(parent)
     end)
     MMO:StyleButton(shareBtn)
     shareBtn:Hide()
+
+    -- Library button (always visible)
+    libraryBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    libraryBtn:SetSize(60, 18)
+    libraryBtn:SetPoint("TOPLEFT", shareBtn, "TOPRIGHT", 6, 0)
+    libraryBtn:SetNormalFontObject(GameFontNormalSmall)
+    libraryBtn:SetHighlightFontObject(GameFontHighlightSmall)
+    libraryBtn:SetText("Library")
+    libraryBtn:SetScript("OnClick", function()
+        if MMO.ToggleMacroLibrary then
+            MMO:ToggleMacroLibrary()
+        end
+    end)
+    MMO:StyleButton(libraryBtn)
 
     -- Copy button
     copyBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
