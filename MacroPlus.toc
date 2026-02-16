@@ -10,14 +10,17 @@ Core\Database.lua
 Core\CombatLock.lua
 Engine\Scraper.lua
 Engine\ImportExport.lua
+Engine\Sharing.lua
 UI\MainFrame.lua
 UI\Sidebar.lua
 UI\MacroGrid.lua
 UI\SearchBar.lua
 UI\Editor.lua
+UI\ShareDialog.lua
 Engine\Sync.lua
 Data\SlashCommands.lua
 Data\Conditions.lua
+Data\SpecialCommands.lua
 Engine\Parser.lua
 Engine\Shortener.lua
 UI\CommandPanel.lua

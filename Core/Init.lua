@@ -50,6 +50,8 @@ function MMO:OnLoad()
     -- Add button to the ESC Game Menu
     self:HookGameMenu()
 
+    C_ChatInfo.RegisterAddonMessagePrefix("MPLUS")
+
     self.isLoaded = true
     print("|cff00ccff[MacroPlus]|r v0.1.0 loaded.")
 end

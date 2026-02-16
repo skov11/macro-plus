@@ -72,7 +72,7 @@ macro-plus/
 | 3 | Editor, Sync | Live editing connected to `EditMacro` API | ✅ Complete |
 | 4 | SlashCommands, CommandPanel, ConditionBuilder, Parser, Shortener | Command panel, condition builder, parser, shortener | ✅ Complete |
 | 5A | ImportExport, Sidebar | Clipboard import/export of character macro sets | Planned |
-| 5B | SpecialCommands, CommandPanel | Insert Special scripts & equipment slot references | Planned |
+| 5B | SpecialCommands, CommandPanel | Collapsible sections: Commands, Special, Slots, Markers, Target | ✅ Complete |
 | 5C | Sharing, ShareDialog, Init, Editor | Send/receive macros via character name or BattleTag | Planned |
 | 5D | ClassMacros, MacroLibrary, Editor | Class/spec-aware common macro library popup | Planned |
 
@@ -178,10 +178,11 @@ See plan file at `.claude/plans/golden-brewing-tide.md` for full details.
 - Import macros from clipboard into General or current character
 - Export button on every character, Import button next to New buttons
 
-**5B — Insert Special / Insert Slot:**
-- Split bottom command panel into two columns
-- Left: existing slash commands. Right: special script snippets + equipment slot references
-- One-click insert of `/run` scripts and equipment slot numbers
+**5B — Command Panel Collapsible Sections:** ✅
+- Single scrollable panel with 5 collapsible sections: Commands, Insert Special, Equipment Slots, Raid Markers, Target
+- Commands expanded by default with inline category dropdown + search; all others collapsed
+- Each section: clickable header with collapse arrow + gold label, full-width button grids when expanded
+- Insert Special/Slots/Markers render as button grids; Target has inline text input + Insert button
 
 **5C — Macro Sharing:**
 - Send macros to other MacroPlus users via character name or BattleTag

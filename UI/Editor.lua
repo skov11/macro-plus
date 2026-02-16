@@ -11,7 +11,7 @@ local editBox, scrollFrame
 local highlightOverlay
 local charCounter
 local headerIcon, headerNameBox, changeIconBtn
-local saveBtn, deleteBtn, copyBtn
+local saveBtn, deleteBtn, copyBtn, shareBtn
 local saveToDropdown, saveToLabel
 local statusText
 local iconPickerFrame
@@ -251,6 +251,7 @@ local function SetReadOnly(readOnly)
         changeIconBtn:Hide()
         saveToDropdown:Hide()
         saveToLabel:Hide()
+        shareBtn:Show()
         copyBtn:Show()
         statusText:SetText("|cffff8800Read-only|r (alt character)")
         statusText:Show()
@@ -264,10 +265,12 @@ local function SetReadOnly(readOnly)
 
         if isNewMacroMode then
             deleteBtn:Hide()
+            shareBtn:Hide()
             saveToDropdown:Show()
             saveToLabel:Show()
         else
             deleteBtn:Show()
+            shareBtn:Show()
             saveToDropdown:Hide()
             saveToLabel:Hide()
         end
@@ -286,6 +289,7 @@ local function UpdateButtonStates()
         deleteBtn:Disable()
         copyBtn:Disable()
         changeIconBtn:Disable()
+        shareBtn:Disable()
         return
     end
 
@@ -296,6 +300,7 @@ local function UpdateButtonStates()
         deleteBtn:Enable()
         copyBtn:Enable()
         changeIconBtn:Enable()
+        shareBtn:Enable()
     end
 end
 
@@ -540,6 +545,21 @@ local function CreateEditorUI(parent)
         end
     end)
     MMO:StyleButton(shortenBtn)
+
+    -- Share button
+    shareBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+    shareBtn:SetSize(60, 18)
+    shareBtn:SetPoint("TOPLEFT", shortenBtn, "TOPRIGHT", 6, 0)
+    shareBtn:SetNormalFontObject(GameFontNormalSmall)
+    shareBtn:SetHighlightFontObject(GameFontHighlightSmall)
+    shareBtn:SetText("Share")
+    shareBtn:SetScript("OnClick", function()
+        if currentMacro and MMO.ShowShareDialog then
+            MMO:ShowShareDialog(currentMacro)
+        end
+    end)
+    MMO:StyleButton(shareBtn)
+    shareBtn:Hide()
 
     -- Copy button
     copyBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")

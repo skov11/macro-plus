@@ -9,6 +9,9 @@ local sharedExpanded  = false
 -- ScrollFrame and content container
 local scrollFrame, scrollChild
 
+-- Measurement font string (created once, reused to measure text widths)
+local measureFont
+
 local function InitCollapseDefaults()
     local currentRealm = GetRealmName()
     local currentChar = UnitName("player")
@@ -40,6 +43,10 @@ local function CreateSidebarUI(parent)
 
     MMO.sidebarScrollChild = scrollChild
 
+    -- Create a hidden FontString for measuring text widths
+    measureFont = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    measureFont:Hide()
+
     InitCollapseDefaults()
 end
 
@@ -61,7 +68,7 @@ local function CountMacrosByType(macros, isAccountFilter)
     return count
 end
 
-local function CreateMacroGridPlaceholder(parent, realm, charName, isAccountSection, yOffset)
+local function CreateMacroGridPlaceholder(parent, realm, charName, isAccountSection, yOffset, gridWidth)
     local macros = MMO:GetCharacterMacros(realm, charName)
     local macroCount = CountMacrosByType(macros, isAccountSection)
 
@@ -70,7 +77,7 @@ local function CreateMacroGridPlaceholder(parent, realm, charName, isAccountSect
 
     local gridFrame = CreateFrame("Frame", nil, parent)
     gridFrame:SetPoint("TOPLEFT", 16, yOffset)
-    gridFrame:SetSize(220, gridHeight)
+    gridFrame:SetSize(gridWidth, gridHeight)
     gridFrame.realm = realm
     gridFrame.charName = charName
     gridFrame.isAccountSection = isAccountSection
@@ -184,6 +191,14 @@ local function GetSidebarContentWidth()
     return 220
 end
 
+local function MeasureTextWidth(text)
+    if measureFont then
+        measureFont:SetText(text)
+        return measureFont:GetStringWidth()
+    end
+    return 60  -- fallback estimate
+end
+
 local function CreateCollapsibleHeader(parent, text, color, isExpanded, yOffset, onClick)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetPoint("TOPLEFT", 8, yOffset)
@@ -203,6 +218,23 @@ local function CreateCollapsibleHeader(parent, text, color, isExpanded, yOffset,
     return btn
 end
 
+-- Fixed-pixel widths for character row elements (inside the btn frame)
+-- arrow(16) starts at LEFT+2, then faction(24)+gap(2), race(24)+gap(2), class(24)+gap(4) before name
+local CHAR_ROW_PRE_NAME  = 2 + 16 + 2 + 24 + 2 + 24 + 2 + 24 + 4  -- = 100
+-- After name: gap(4) + export(52) + margin(2)
+local CHAR_ROW_POST_NAME = 4 + 52 + 2  -- = 58
+-- The btn itself starts at TOPLEFT x=16 inside the scroll child, plus 4px right margin on scroll child
+local CHAR_ROW_OUTER_PAD = 16 + 4  -- = 20
+-- Minimum grid width: 5 icons * (40 + 4) = 220, plus left padding 16
+local GRID_MIN_WIDTH     = 5 * (40 + 4)  -- = 220 (grid content only)
+local GRID_LEFT_PAD      = 16
+-- Sidebar frame insets: left(4) + right(4) from backdrop + scrollbar(24)
+local SIDEBAR_INSETS     = 4 + 4 + 24  -- = 32
+-- Absolute minimum sidebar width
+local SIDEBAR_MIN_WIDTH  = 250
+-- Absolute maximum sidebar width (prevent runaway expansion)
+local SIDEBAR_MAX_WIDTH  = 400
+
 function MMO:RefreshSidebar()
     if not scrollChild then return end
     ClearSidebar()
@@ -213,20 +245,30 @@ function MMO:RefreshSidebar()
     local currentRealm = GetRealmName()
     local currentChar = UnitName("player")
 
+    -- Track the widest content to size the sidebar dynamically
+    local maxNeededWidth = 0
+
+    -- The macro grid always needs at least this much sidebar inner width
+    local gridTotalWidth = GRID_LEFT_PAD + GRID_MIN_WIDTH  -- 16 + 220 = 236
+
     -- === General section ===
     if currentRealm and currentChar then
         local isExpanded = sharedExpanded
-        CreateCollapsibleHeader(scrollChild, "General", "|cffffcc00", isExpanded, yOffset, function()
+        local headerBtn = CreateCollapsibleHeader(scrollChild, "General", "|cffffcc00", isExpanded, yOffset, function()
             sharedExpanded = not sharedExpanded
             MMO:RefreshSidebar()
         end)
+
+        -- Export button on the General header
+        CreateExportButton(headerBtn, currentRealm, currentChar, true)
+
         yOffset = yOffset - 28
 
         if isExpanded then
             CreateNewMacroButton(scrollChild, yOffset, true)
             CreateImportButton(scrollChild, yOffset, true)
             yOffset = yOffset - 28
-            local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset)
+            local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset, GRID_MIN_WIDTH)
             yOffset = yOffset - (gridHeight + 16)
         end
     end
@@ -261,6 +303,13 @@ function MMO:RefreshSidebar()
                 local isCurrent = self:IsCurrentCharacter(realm, charName)
                 local charKey = realm .. charName
                 local charExpanded = collapsedChars[charKey] or false
+
+                -- Measure character name width for dynamic sidebar sizing
+                local nameWidth = MeasureTextWidth(charName)
+                local rowWidth = CHAR_ROW_OUTER_PAD + CHAR_ROW_PRE_NAME + nameWidth + CHAR_ROW_POST_NAME
+                if rowWidth > maxNeededWidth then
+                    maxNeededWidth = rowWidth
+                end
 
                 -- Character button
                 local btn = CreateFrame("Button", nil, scrollChild)
@@ -317,7 +366,7 @@ function MMO:RefreshSidebar()
                     classIcon:SetTexCoord(unpack(coords))
                 end
 
-                -- Character name (GameFontNormalLarge)
+                -- Character name (GameFontNormalLarge) -- no truncation, full name displayed
                 local label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
                 label:SetPoint("LEFT", classIcon, "RIGHT", 4, 0)
                 if isCurrent then
@@ -352,7 +401,7 @@ function MMO:RefreshSidebar()
                         CreateImportButton(scrollChild, yOffset, false)
                         yOffset = yOffset - 28
                     end
-                    local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset)
+                    local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset, GRID_MIN_WIDTH)
                     yOffset = yOffset - (gridHeight + 8)
                 end
             end
@@ -361,6 +410,26 @@ function MMO:RefreshSidebar()
     end
 
     scrollChild:SetHeight(math.abs(yOffset) + 20)
+
+    -- === Dynamic sidebar width calculation ===
+    -- Take the wider of: widest character row vs macro grid minimum
+    local neededInner = math.max(maxNeededWidth, gridTotalWidth)
+    -- Add sidebar frame insets (backdrop padding + scrollbar)
+    local sidebarWidth = neededInner + SIDEBAR_INSETS
+    -- Clamp to min/max bounds
+    sidebarWidth = math.max(sidebarWidth, SIDEBAR_MIN_WIDTH)
+    sidebarWidth = math.min(sidebarWidth, SIDEBAR_MAX_WIDTH)
+
+    local sidebar = _G["MacroPlusSidebar"]
+    if sidebar then
+        sidebar:SetWidth(sidebarWidth)
+    end
+
+    -- Update scroll child width to match new sidebar inner width
+    if scrollChild and scrollFrame then
+        local innerWidth = sidebarWidth - SIDEBAR_INSETS
+        scrollChild:SetWidth(innerWidth)
+    end
 end
 
 -- Hook into MainFrame creation
