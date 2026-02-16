@@ -30,29 +30,6 @@ A World of Warcraft addon for **Midnight (Interface: 120000)** that replaces the
 
 ---
 
-## UI Layout
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  MacroPlus                                           [X]    │
-├──────────────────────┬──────────────────────────────────────┤
-│  [🔍 Search...]      │  [icon] Name  [Cond][Short][Save][Del] │
-│                      │  ┌────────────────────────────────┐  │
-│  ▼ General           │  │  Multi-line EditBox            │  │
-│   [New]              │  │  with syntax highlighting      │  │
-│   [□][□][□][□][□]    │  │  overlay and live parsing      │  │
-│                      │  └────────────────────────────────┘  │
-│  ▼ Realm Name        │  0/255                   [Read-only] │
-│   ▼ 🛡️ CharName      │──────────────────────────────────────│
-│    [New]             │  Commands        [Category▾] [🔍]    │
-│    [□][□][□]         │  [/cast] [/use] [/target] [/focus]   │
-│   ▶ AltChar          │  [/equip] [/cancelaura] ...          │
-│                      │  click → inserts at cursor           │
-└──────────────────────┴──────────────────────────────────────┘
-```
-
----
-
 ## Installation
 
 1. Clone this repository
