@@ -792,4 +792,8 @@ function MMO:LoadMacroIntoEditor(macroData)
     editBox:SetCursorPosition(0)
 
     UpdateButtonStates()
+
+    if self.RefreshConditionBuilder then
+        self:RefreshConditionBuilder()
+    end
 end
