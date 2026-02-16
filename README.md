@@ -1,4 +1,4 @@
-# Midnight Macro Overhaul (MMO)
+# Macro Plus
 
 A World of Warcraft addon for **Midnight (Interface: 120000)** that replaces the default Macro UI with a cross-character macro library, a modern IDE-style editor, and a searchable slash-command encyclopedia.
 
