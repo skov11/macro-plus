@@ -565,11 +565,11 @@ local function CreateEditorUI(parent)
 
     -- Library button (always visible)
     libraryBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-    libraryBtn:SetSize(60, 18)
+    libraryBtn:SetSize(90, 18)
     libraryBtn:SetPoint("TOPLEFT", shareBtn, "TOPRIGHT", 6, 0)
     libraryBtn:SetNormalFontObject(GameFontNormalSmall)
     libraryBtn:SetHighlightFontObject(GameFontHighlightSmall)
-    libraryBtn:SetText("Library")
+    libraryBtn:SetText("Recommended")
     libraryBtn:SetScript("OnClick", function()
         if MMO.ToggleMacroLibrary then
             MMO:ToggleMacroLibrary()
