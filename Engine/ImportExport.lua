@@ -5,19 +5,116 @@ local MAX_CHARACTER_MACROS = 18
 
 local VERSION_PREFIX = "MPX1:"
 
+-- Default fallback icon: INV_Misc_QuestionMark (the standard "?" icon)
+local FALLBACK_ICON = 134400
+
+-- ─── Icon resolution ───────────────────────────────────────────────
+-- GetMacroInfo returns icon as a numeric FileDataID (e.g. 134400).
+-- After serialization the icon travels as a string ("134400") and
+-- must be converted back to a number before calling CreateMacro.
+-- CreateMacro accepts a numeric FileDataID but rejects 0, nil, and
+-- empty strings with a "no icon specified" error.  This helper
+-- ensures the value is always safe to pass.
+
+local function ResolveIconForCreateMacro(icon)
+    if icon == nil then
+        return FALLBACK_ICON
+    end
+
+    -- If it is already a number, validate it
+    if type(icon) == "number" then
+        if icon > 0 then
+            return icon
+        end
+        return FALLBACK_ICON
+    end
+
+    -- String handling: try numeric conversion first
+    if type(icon) == "string" then
+        -- Reject empty or whitespace-only strings
+        if icon == "" or icon:match("^%s*$") then
+            return FALLBACK_ICON
+        end
+
+        local asNum = tonumber(icon)
+        if asNum and asNum > 0 then
+            return asNum
+        end
+
+        -- Non-numeric string (e.g. "INV_Misc_QuestionMark") — pass as-is
+        if not asNum then
+            return icon
+        end
+
+        -- asNum was 0 or negative
+        return FALLBACK_ICON
+    end
+
+    return FALLBACK_ICON
+end
+
+-- Expose on namespace so ShareDialog and Sync can reuse it
+MMO.ResolveIconForCreateMacro = ResolveIconForCreateMacro
+
+-- ─── WoW EditBox text escaping ─────────────────────────────────────
+-- WoW's EditBox:GetText() automatically escapes "|" as "||" and "\"
+-- as "\\".  Conversely, EditBox:SetText() interprets "||" as a
+-- literal "|" and "\\" as a literal "\".  Because our serialized
+-- export format uses "|" as a field delimiter, these transformations
+-- corrupt the data when it passes through an EditBox round-trip.
+--
+-- EscapeForEditBox   — call BEFORE SetText() so the EditBox stores
+--                      and displays the raw serialized characters.
+-- UnescapeEditBoxText — call AFTER GetText() so we recover the raw
+--                       serialized string for deserialization.
+--
+-- IMPORTANT: Only call UnescapeEditBoxText on strings obtained from
+-- EditBox:GetText().  Do NOT call it on raw serialized strings (e.g.
+-- from addon messages) because the serialized format legitimately
+-- contains "\\" (escaped backslash) which would be corrupted.
+
+local function EscapeForEditBox(str)
+    -- Order matters: escape backslashes first so that the backslash
+    -- introduced by pipe escaping is not itself re-escaped.
+    str = str:gsub("\\", "\\\\")
+    str = str:gsub("|",  "||")
+    return str
+end
+
+local function UnescapeEditBoxText(str)
+    -- Undo WoW GetText() escaping.  Pipes first, then backslashes.
+    str = str:gsub("||", "|")
+    str = str:gsub("\\\\", "\\")
+    return str
+end
+
 -- ─── Escaping helpers ────────────────────────────────────────────────
+-- Encoding uses placeholder tokens that cannot appear in normal macro
+-- text (\x01, \x02, \x03) so that each replacement is fully independent
+-- and ordering never causes cross-contamination.
 
 local function EscapeField(str)
-    str = str:gsub("\\", "\\\\")   -- escape backslashes first
-    str = str:gsub("|", "\\p")     -- escape pipe (field delimiter)
-    str = str:gsub(";;", "\\s")    -- escape double-semicolon (macro delimiter)
+    str = str:gsub("\\", "\001")   -- backslash  → \x01 (temp token)
+    str = str:gsub("|",  "\002")   -- pipe       → \x02
+    str = str:gsub(";;", "\003")   -- double-semi→ \x03
+    -- Now convert tokens to printable escape sequences
+    str = str:gsub("\001", "\\\\") -- \x01 → literal \\
+    str = str:gsub("\002", "\\p")  -- \x02 → literal \p
+    str = str:gsub("\003", "\\s")  -- \x03 → literal \s
     return str
 end
 
 local function UnescapeField(str)
-    str = str:gsub("\\s", ";;")
-    str = str:gsub("\\p", "|")
-    str = str:gsub("\\\\", "\\")
+    -- Reverse of EscapeField: convert printable escapes to temp tokens
+    -- first, then tokens to the real characters.  This avoids the bug
+    -- where unescaping \\p (escaped-backslash + literal-p) would be
+    -- misread as an escaped-pipe.
+    str = str:gsub("\\\\", "\001") -- literal \\ → \x01
+    str = str:gsub("\\p",  "\002") -- literal \p → \x02
+    str = str:gsub("\\s",  "\003") -- literal \s → \x03
+    str = str:gsub("\001", "\\")   -- \x01 → backslash
+    str = str:gsub("\002", "|")    -- \x02 → pipe
+    str = str:gsub("\003", ";;")   -- \x03 → double-semicolon
     return str
 end
 
@@ -36,7 +133,7 @@ function MMO:SerializeMacros(macros)
         local m = macros[idx]
         if m and m.name and m.name ~= "" then
             local name = EscapeField(m.name)
-            local icon = tostring(m.icon or 134400)
+            local icon = tostring(m.icon or FALLBACK_ICON)
             local body = EscapeField(m.body or "")
             table.insert(entries, name .. "|" .. icon .. "|" .. body)
         end
@@ -48,8 +145,35 @@ end
 
 -- ─── Deserialize clipboard string to macro list ──────────────────────
 
+-- Split a string on a single-character literal delimiter, preserving
+-- empty fields (unlike gmatch("[^X]+") which silently skips them).
+-- Returns a table of substrings.  maxParts limits the number of splits;
+-- the last element contains the remainder of the string.
+local function SplitOnChar(str, char, maxParts)
+    local parts = {}
+    local pos = 1
+    while true do
+        if maxParts and #parts >= maxParts - 1 then
+            -- Last part: take the rest of the string unchanged
+            table.insert(parts, str:sub(pos))
+            return parts
+        end
+        local idx = str:find(char, pos, true)
+        if not idx then
+            table.insert(parts, str:sub(pos))
+            return parts
+        end
+        table.insert(parts, str:sub(pos, idx - 1))
+        pos = idx + 1
+    end
+end
+
 function MMO:DeserializeMacros(str)
     if not str or str == "" then return nil, "Empty string" end
+
+    -- Strip leading/trailing whitespace that may have been introduced
+    -- by the paste operation
+    str = str:match("^%s*(.-)%s*$") or str
 
     -- Check version prefix
     if str:sub(1, #VERSION_PREFIX) ~= VERSION_PREFIX then
@@ -60,8 +184,8 @@ function MMO:DeserializeMacros(str)
     if data == "" then return nil, "No macro data found" end
 
     local macros = {}
-    -- Split on ;; but not escaped \;; — we already handle escaping in fields
-    -- Simple split: find ;; that aren't preceded by backslash
+    -- Split on ;; (macro delimiter).  We search for literal ";;" using
+    -- plain find so that escaped sequences inside fields are untouched.
     local pos = 1
     while pos <= #data do
         local sepStart, sepEnd = data:find(";;", pos, true)
@@ -75,29 +199,27 @@ function MMO:DeserializeMacros(str)
             pos = #data + 1
         end
 
-        -- Split entry into name|icon|body (3 fields)
-        local parts = {}
-        for field in entry:gmatch("[^|]+") do
-            table.insert(parts, field)
-        end
-        -- Handle empty body (last field could be empty)
-        if #parts >= 2 then
-            local name = UnescapeField(parts[1] or "")
-            local icon = parts[2] or "134400"
-            -- Body is everything after second pipe (rejoin in case body had escaped pipes)
-            local bodyStart = entry:find("|", entry:find("|") + 1)
-            local body = ""
-            if bodyStart then
-                body = UnescapeField(entry:sub(bodyStart + 1))
-            end
+        -- Split entry into exactly 3 fields: name | icon | body
+        -- Using SplitOnChar with maxParts=3 so that any pipe characters
+        -- inside the (still-escaped) body are kept as-is in parts[3].
+        local parts = SplitOnChar(entry, "|", 3)
 
-            if name ~= "" then
-                table.insert(macros, {
-                    name = name,
-                    icon = icon,
-                    body = body,
-                })
-            end
+        local rawName = parts[1] or ""
+        local rawIcon = parts[2] or ""
+        local rawBody = parts[3] or ""
+
+        local name = UnescapeField(rawName)
+        -- Resolve the icon immediately at parse time so that
+        -- consumers always get a value safe for CreateMacro.
+        local icon = ResolveIconForCreateMacro(rawIcon)
+        local body = UnescapeField(rawBody)
+
+        if name ~= "" then
+            table.insert(macros, {
+                name = name,
+                icon = icon,
+                body = body,
+            })
         end
     end
 
@@ -146,6 +268,12 @@ end
 
 local exportFrame
 
+-- The stored export string for the current session; used to keep the
+-- EditBox content read-only and to re-apply text after any accidental
+-- user input.  This stores the EditBox-escaped version so it can be
+-- passed directly to SetText().
+local exportStoredText = ""
+
 local function CreateExportDialog()
     exportFrame = CreateFrame("Frame", "MacroPlusExportDialog", UIParent, "BackdropTemplate")
     exportFrame:SetSize(440, 200)
@@ -176,7 +304,7 @@ local function CreateExportDialog()
 
     local hint = exportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     hint:SetPoint("TOPLEFT", 20, -40)
-    hint:SetText("|cffaaaaaaClick Copy or press Ctrl+A then Ctrl+C:|r")
+    hint:SetText("|cffaaaaaaPress Ctrl+C to copy the selected text:|r")
 
     local sf = CreateFrame("ScrollFrame", nil, exportFrame, "UIPanelScrollFrameTemplate")
     sf:SetPoint("TOPLEFT", 20, -58)
@@ -190,28 +318,42 @@ local function CreateExportDialog()
     eb:SetTextColor(1, 0.82, 0)
     sf:SetScrollChild(eb)
 
+    -- When the EditBox gains focus (from clicking Copy, clicking inside
+    -- the box, or tabbing in), automatically select all text so that
+    -- Ctrl+C will copy the full export string.
+    eb:SetScript("OnEditFocusGained", function(self)
+        self:HighlightText()
+    end)
+
+    -- After a mouse-click-and-drag inside the EditBox the user may have
+    -- changed the selection.  Re-select everything on mouse-up so the
+    -- full string is always ready for Ctrl+C.
+    eb:SetScript("OnMouseUp", function(self)
+        self:HighlightText()
+    end)
+
+    -- Keep the EditBox read-only: if the user types anything, revert to
+    -- the stored export string and re-highlight.  The second argument to
+    -- OnTextChanged is `userInput` (true when the change came from the
+    -- keyboard rather than SetText).
+    eb:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then
+            self:SetText(exportStoredText)
+            self:HighlightText()
+        end
+    end)
+
+    -- Suppress individual character input so typed keys never appear,
+    -- even briefly, before OnTextChanged reverts them.
+    eb:SetScript("OnChar", function() end)
+
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus(); exportFrame:Hide() end)
 
     exportFrame.editBox = eb
 
-    local copyBtn = CreateFrame("Button", nil, exportFrame, "UIPanelButtonTemplate")
-    copyBtn:SetSize(80, 22)
-    copyBtn:SetPoint("BOTTOMRIGHT", -100, 16)
-    copyBtn:SetText("Copy")
-    copyBtn:SetScript("OnClick", function()
-        local text = exportFrame.editBox:GetText()
-        if text and text ~= "" then
-            exportFrame.editBox:HighlightText()
-            exportFrame.editBox:SetFocus()
-            CopyToClipboard(text)
-            print("|cff00ccff[MacroPlus]|r Copied to clipboard.")
-        end
-    end)
-    MMO:StyleButton(copyBtn)
-
     local doneBtn = CreateFrame("Button", nil, exportFrame, "UIPanelButtonTemplate")
     doneBtn:SetSize(80, 22)
-    doneBtn:SetPoint("BOTTOMRIGHT", -12, 16)
+    doneBtn:SetPoint("BOTTOM", 0, 16)
     doneBtn:SetText("Done")
     doneBtn:SetScript("OnClick", function() exportFrame:Hide() end)
     MMO:StyleButton(doneBtn)
@@ -221,11 +363,24 @@ function MMO:ShowExportDialog(str)
     if not exportFrame then
         CreateExportDialog()
     end
-    exportFrame.editBox:SetText(str)
+
+    -- Escape for WoW's EditBox so that "|" and "\" in the serialized
+    -- string are displayed literally rather than interpreted as UI
+    -- escape sequences.  Store the escaped version so the read-only
+    -- guard in OnTextChanged can restore it via SetText().
+    exportStoredText = EscapeForEditBox(str)
+
+    exportFrame.editBox:SetText(exportStoredText)
     exportFrame.editBox:SetWidth(370)
     exportFrame:Show()
-    exportFrame.editBox:HighlightText()
+
+    -- Focus FIRST, then highlight.  SetFocus must precede HighlightText
+    -- because an unfocused EditBox discards highlight state.  The
+    -- OnEditFocusGained handler also calls HighlightText as a safety
+    -- net, but the explicit call here covers the (rare) case where the
+    -- EditBox already held focus from a previous export.
     exportFrame.editBox:SetFocus()
+    exportFrame.editBox:HighlightText()
 end
 
 -- ─── Import dialog: paste editbox ────────────────────────────────────
@@ -312,9 +467,14 @@ function MMO:ShowImportDialog(isAccount)
     importFrame.importBtn:SetScript("OnClick", function()
         local text = importFrame.editBox:GetText()
         if not text or text:match("^%s*$") then
-            print("|cff00ccff[MacroPlus]|r Nothing to import — paste a macro string first.")
+            print("|cff00ccff[MacroPlus]|r Nothing to import -- paste a macro string first.")
             return
         end
+
+        -- WoW's EditBox:GetText() escapes "|" as "||" and "\" as "\\".
+        -- Undo that so the serialized delimiters ("|" between fields)
+        -- are restored before we pass the string to DeserializeMacros.
+        text = UnescapeEditBoxText(text)
 
         local macros, err = MMO:DeserializeMacros(text)
         if not macros then
@@ -339,13 +499,12 @@ function MMO:ShowImportDialog(isAccount)
             if slotsUsed >= slotsMax then
                 skipped = skipped + 1
             else
-                local iconPath = m.icon
-                -- If icon is a number string, convert to number for CreateMacro
-                local iconNum = tonumber(iconPath)
-                if iconNum then iconPath = iconNum end
+                -- Icon is already resolved to a safe value by
+                -- DeserializeMacros via ResolveIconForCreateMacro.
+                local icon = m.icon
 
                 local perCharacter = not isAccount
-                local newIndex = CreateMacro(m.name, iconPath or "INV_Misc_QuestionMark", m.body or "", perCharacter)
+                local newIndex = CreateMacro(m.name, icon, m.body or "", perCharacter)
                 if newIndex then
                     imported = imported + 1
                 else
@@ -364,7 +523,7 @@ function MMO:ShowImportDialog(isAccount)
 
         local msg = "|cff00ccff[MacroPlus]|r Imported " .. imported .. "/" .. #macros .. " macros."
         if skipped > 0 then
-            msg = msg .. " (" .. skipped .. " skipped — no slots)."
+            msg = msg .. " (" .. skipped .. " skipped -- no slots)."
         end
         print(msg)
     end)

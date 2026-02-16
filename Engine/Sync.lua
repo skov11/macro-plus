@@ -12,7 +12,10 @@ function MMO:CopyMacroToCurrentChar(macroData)
     if not macroData then return end
 
     local name = macroData.name or "Unnamed"
-    local icon = macroData.icon
+    -- Resolve icon through the shared helper so that nil, 0, empty
+    -- string, or unexpected types are normalised to a safe value
+    -- before reaching CreateMacro.
+    local icon = MMO.ResolveIconForCreateMacro(macroData.icon)
     local body = macroData.body or ""
     local isAccount = macroData.isAccount
 

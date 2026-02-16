@@ -461,15 +461,10 @@ function MMO:DisplayAcceptDialog(senderName, macroData)
     local body = macroData.body or ""
     local icon = macroData.icon
 
-    -- Resolve icon texture
-    local iconTexture = icon
-    local iconNum = tonumber(icon)
-    if iconNum then
-        iconTexture = iconNum
-    end
-    if not iconTexture or iconTexture == 0 or iconTexture == "" then
-        iconTexture = "Interface\\Icons\\INV_Misc_QuestionMark"
-    end
+    -- Resolve icon for display via the shared helper.  SetTexture
+    -- accepts both numeric FileDataIDs and texture path strings,
+    -- so the resolved value works for both display and CreateMacro.
+    local iconTexture = MMO.ResolveIconForCreateMacro(icon)
 
     acceptFrame.fromLabel:SetText("From: |cff00ccff" .. senderName .. "|r")
     acceptFrame.macroIcon:SetTexture(iconTexture)
@@ -498,9 +493,10 @@ function MMO:DisplayAcceptDialog(senderName, macroData)
             return
         end
 
-        local iconPath = icon
-        local iconAsNum = tonumber(iconPath)
-        if iconAsNum then iconPath = iconAsNum end
+        -- Use the shared icon resolver to get a safe value for
+        -- CreateMacro.  This handles nil, empty string, zero, and
+        -- numeric-string-to-number conversion in one place.
+        local safeIcon = MMO.ResolveIconForCreateMacro(icon)
 
         local _, numCharacter = GetNumMacros()
         if numCharacter >= 18 then
@@ -511,7 +507,7 @@ function MMO:DisplayAcceptDialog(senderName, macroData)
             return
         end
 
-        local newIndex = CreateMacro(name, iconPath or "INV_Misc_QuestionMark", body, true)
+        local newIndex = CreateMacro(name, safeIcon, body, true)
         if newIndex then
             MMO.ScrapeCurrentCharacter()
             if MMO.RefreshSidebar then
