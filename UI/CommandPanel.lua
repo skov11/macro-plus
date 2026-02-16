@@ -21,7 +21,7 @@ local openMenus = {}
 
 -- Collapse state for each section
 local sectionExpanded = {
-    commands = true,
+    commands = false,
     special  = false,
     slots    = false,
     markers  = false,
@@ -31,11 +31,18 @@ local sectionExpanded = {
 -- Pool of created frames to recycle on refresh
 local framePool = {}
 
--- ─── Insert text at editor cursor ─────────────────────────────────────
+-- ─── 5E-1: Insert text at editor cursor with 255-char limit pre-check ──
 
 function MMO:InsertAtCursor(text)
     local eb = _G["MacroPlusEditBox"]
     if not eb or not eb:IsEnabled() then return end
+    local currentLen = strlenutf8(eb:GetText())
+    local insertLen = strlenutf8(text)
+    if currentLen + insertLen > 255 then
+        print("|cff00ccff[MacroPlus]|r Not enough space. Command needs "
+              .. insertLen .. " chars (" .. (255 - currentLen) .. " available).")
+        return
+    end
     eb:SetFocus()
     eb:Insert(text)
 end
@@ -95,10 +102,11 @@ local function CreateMenuFrame(parent, width, numItems, itemHeight)
     itemHeight = itemHeight or 20
     local menuHeight = numItems * itemHeight + 4
 
-    local menu = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     menu:SetSize(width, menuHeight)
     menu:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 0, 2)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetFrameLevel(100)
     menu:SetBackdrop({
         bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -108,6 +116,46 @@ local function CreateMenuFrame(parent, width, numItems, itemHeight)
     menu:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
     menu:Hide()
     table.insert(openMenus, menu)
+    return menu
+end
+
+-- ─── Helper: Create a scrollable dropdown menu frame ────────────────
+
+local function CreateScrollableMenuFrame(parent, width, numItems, maxVisible, itemHeight)
+    itemHeight = itemHeight or 20
+    maxVisible = maxVisible or numItems
+    local visibleCount = math.min(numItems, maxVisible)
+    local menuHeight = visibleCount * itemHeight + 4
+
+    local menu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    menu:SetSize(width, menuHeight)
+    menu:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 0, 2)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetFrameLevel(100)
+    menu:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+        insets   = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    menu:SetBackdropBorderColor(0.35, 0.35, 0.35, 0.9)
+    menu:Hide()
+    table.insert(openMenus, menu)
+
+    -- Add a scroll frame inside if we need scrolling
+    if numItems > maxVisible then
+        local scrollFrame = CreateFrame("ScrollFrame", nil, menu, "UIPanelScrollFrameTemplate")
+        scrollFrame:SetPoint("TOPLEFT", 2, -2)
+        scrollFrame:SetPoint("BOTTOMRIGHT", -22, 2)
+
+        local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+        scrollChild:SetWidth(width - 26)
+        scrollChild:SetHeight(numItems * itemHeight)
+        scrollFrame:SetScrollChild(scrollChild)
+
+        menu.scrollChild = scrollChild
+    end
+
     return menu
 end
 
@@ -295,7 +343,7 @@ local function RenderCommandsContent(parent, yOffset, panelWidth)
     return math.max(totalRows * (CMD_BTN_HEIGHT + CMD_BTN_PAD), 1)
 end
 
--- ─── Insert Special section content ──────────────────────────────────
+-- ─── 5E-2 / 5E-5: Insert Special section content ───────────────────
 
 local function RenderSpecialContent(parent, yOffset, panelWidth)
     local items = MMO.SpecialScripts
@@ -315,16 +363,32 @@ local function RenderSpecialContent(parent, yOffset, panelWidth)
         local row = math.floor((i - 1) / maxCols)
         btn:SetPoint("TOPLEFT", 4 + col * (SPECIAL_BTN_WIDTH + CMD_BTN_PAD), -(yOffset + row * (CMD_BTN_HEIGHT + CMD_BTN_PAD)))
 
+        -- 5E-5: Improved tooltip with description, separator, script text, char count
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText(item.name, 0.4, 0.8, 1)
+            if item.desc then
+                GameTooltip:AddLine(item.desc, 1, 1, 1, true)
+            end
             GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Inserts:", 0.5, 0.8, 0.5)
             GameTooltip:AddLine(item.script, 1, 0.82, 0, true)
+            GameTooltip:AddLine("Length: " .. #item.script .. " characters", 0.6, 0.6, 0.6)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- 5E-2: Auto-append newline for special scripts if there is room
         btn:SetScript("OnClick", function()
-            MMO:InsertAtCursor(item.script)
+            local script = item.script
+            local eb = _G["MacroPlusEditBox"]
+            if eb then
+                local remaining = 255 - strlenutf8(eb:GetText())
+                if strlenutf8(script) + 1 <= remaining then
+                    script = script .. "\n"
+                end
+            end
+            MMO:InsertAtCursor(script)
         end)
 
         MMO:StyleButton(btn)
@@ -334,7 +398,7 @@ local function RenderSpecialContent(parent, yOffset, panelWidth)
     return math.max(totalRows * (CMD_BTN_HEIGHT + CMD_BTN_PAD), 1)
 end
 
--- ─── Equipment Slots section content ─────────────────────────────────
+-- ─── 5E-6: Equipment Slots section content ──────────────────────────
 
 local function RenderSlotsContent(parent, yOffset, panelWidth)
     local items = MMO.EquipmentSlots
@@ -354,15 +418,21 @@ local function RenderSlotsContent(parent, yOffset, panelWidth)
         local row = math.floor((i - 1) / maxCols)
         btn:SetPoint("TOPLEFT", 4 + col * (SLOT_BTN_WIDTH + CMD_BTN_PAD), -(yOffset + row * (CMD_BTN_HEIGHT + CMD_BTN_PAD)))
 
+        -- 5E-6: Enhanced tooltip showing slot number, /use syntax, and equipped item
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText(slot.name, 0.4, 0.8, 1)
-            GameTooltip:AddLine("Equipment slot " .. slot.slotNum, 1, 1, 1)
+            GameTooltip:AddLine("Slot " .. slot.slotNum .. "  ->  /use " .. slot.slotNum, 1, 1, 1)
+            local itemLink = GetInventoryItemLink("player", slot.slotNum)
+            if itemLink then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Equipped: " .. itemLink, 0.7, 0.7, 0.7)
+            end
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         btn:SetScript("OnClick", function()
-            MMO:InsertAtCursor(tostring(slot.slotNum))
+            MMO:InsertAtCursor("/use " .. tostring(slot.slotNum))
         end)
 
         MMO:StyleButton(btn)
@@ -372,7 +442,7 @@ local function RenderSlotsContent(parent, yOffset, panelWidth)
     return math.max(totalRows * (CMD_BTN_HEIGHT + CMD_BTN_PAD), 1)
 end
 
--- ─── Raid Markers section content ────────────────────────────────────
+-- ─── 5E-7: Raid Markers section content — insert /tm N command ──────
 
 local function RenderMarkersContent(parent, yOffset, panelWidth)
     local items = MMO.RaidMarkers
@@ -404,15 +474,22 @@ local function RenderMarkersContent(parent, yOffset, panelWidth)
         hl:SetAllPoints()
         hl:SetColorTexture(0.3, 0.5, 0.8, 0.4)
 
+        -- 5E-7: Tooltip shows both /tm N and chat token options
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:SetText(marker.name, unpack(marker.color))
-            GameTooltip:AddLine("Inserts " .. marker.token, 1, 1, 1)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Click inserts:", 0.5, 0.8, 0.5)
+            GameTooltip:AddLine("/tm " .. marker.markerID, 1, 0.82, 0)
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Chat token: " .. marker.token, 0.6, 0.6, 0.6)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- 5E-7: Click inserts /tm N command instead of chat token
         btn:SetScript("OnClick", function()
-            MMO:InsertAtCursor(marker.token)
+            MMO:InsertAtCursor("/tm " .. marker.markerID)
         end)
     end
 
@@ -420,24 +497,87 @@ local function RenderMarkersContent(parent, yOffset, panelWidth)
     return math.max(totalRows * (CMD_BTN_HEIGHT + CMD_BTN_PAD), 1)
 end
 
+-- ─── Standard WoW macro target options for the Target dropdown ──────
+
+local TARGET_OPTIONS = {
+    "@player",
+    "@target",
+    "@focus",
+    "@mouseover",
+    "@cursor",
+    "@pet",
+    "@party1",
+    "@party2",
+    "@party3",
+    "@party4",
+    "@raid1",
+    "@arena1",
+    "@arena2",
+    "@arena3",
+    "@boss1",
+    "@boss2",
+    "@boss3",
+    "@boss4",
+    "@none",
+}
+
 -- ─── Target section content ──────────────────────────────────────────
+
+-- Persistent state for the target section (survives RefreshPanel)
+local targetDropdownSelection = TARGET_OPTIONS[1]  -- default to @player
+local targetCustomText = ""
 
 local function RenderTargetContent(parent, yOffset)
     local container = CreateFrame("Frame", nil, parent)
     container:SetPoint("TOPLEFT", 4, -yOffset)
     container:SetPoint("RIGHT", -4, 0)
-    container:SetHeight(28)
+    container:SetHeight(60)
     PoolFrame(container)
 
-    -- Label
-    local label = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("LEFT", 0, 0)
-    label:SetText("|cffffcc00Target:|r")
+    -- ─── Row 1: Dropdown ────────────────────────────────────────────
 
-    -- Input box
+    local ddLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ddLabel:SetPoint("TOPLEFT", 0, 0)
+    ddLabel:SetText("|cffffcc00Preset:|r")
+
+    local dd = CreateDropdownButton(container, 140, targetDropdownSelection)
+    dd:SetPoint("LEFT", ddLabel, "RIGHT", 4, 0)
+    PoolFrame(dd)
+
+    -- Build menu with scrolling (max 10 visible rows)
+    local maxVisible = 10
+    local menu = CreateScrollableMenuFrame(dd, 140, #TARGET_OPTIONS, maxVisible)
+
+    local menuParent = menu.scrollChild or menu
+    local menuItemWidth = menu.scrollChild and (140 - 26) or 140
+
+    for i, optValue in ipairs(TARGET_OPTIONS) do
+        local opt = CreateMenuOption(menuParent, menuItemWidth, i, optValue)
+        opt:SetScript("OnClick", function()
+            targetDropdownSelection = optValue
+            dd.label:SetText(optValue)
+            targetCustomText = ""
+            menu:Hide()
+            -- Refresh to clear the custom input visually
+            RefreshPanel()
+        end)
+    end
+
+    dd:SetScript("OnClick", function()
+        local wasShown = menu:IsShown()
+        CloseAllMenus()
+        if not wasShown then menu:Show() end
+    end)
+
+    -- ─── Row 2: Custom input + Insert button ────────────────────────
+
+    local customLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    customLabel:SetPoint("TOPLEFT", 0, -28)
+    customLabel:SetText("|cffffcc00Custom:|r")
+
     local input = CreateFrame("EditBox", nil, container, "BackdropTemplate")
-    input:SetSize(120, 22)
-    input:SetPoint("LEFT", label, "RIGHT", 4, 0)
+    input:SetSize(140, 22)
+    input:SetPoint("LEFT", customLabel, "RIGHT", 4, 0)
     input:SetFontObject(GameFontNormalSmall)
     input:SetTextColor(1, 1, 1)
     input:SetAutoFocus(false)
@@ -452,24 +592,45 @@ local function RenderTargetContent(parent, yOffset)
     input:SetTextInsets(6, 6, 0, 0)
     PoolFrame(input)
 
+    -- Restore any previously typed custom text
+    if targetCustomText ~= "" then
+        input:SetText(targetCustomText)
+    end
+
     local placeholder = input:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     placeholder:SetPoint("LEFT", 6, 0)
-    placeholder:SetText("|cff666666mouseover|r")
+    placeholder:SetText("|cff666666@PlayerName|r")
+    if targetCustomText ~= "" then
+        placeholder:Hide()
+    end
 
-    input:SetScript("OnTextChanged", function(self)
-        if self:GetText() ~= "" then
+    input:SetScript("OnTextChanged", function(self, userInput)
+        local text = self:GetText()
+        if text ~= "" then
             placeholder:Hide()
         else
             placeholder:Show()
+        end
+        -- Track custom text so it persists across refreshes
+        if userInput then
+            targetCustomText = text
         end
     end)
     input:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     input:SetScript("OnEnterPressed", function(self)
         local text = self:GetText()
         if text and text ~= "" then
-            MMO:InsertAtCursor("@" .. text)
+            -- Prepend @ if the user did not include it
+            if text:sub(1, 1) ~= "@" then
+                text = "@" .. text
+            end
+            MMO:InsertAtCursor(text)
+            targetCustomText = ""
             self:SetText("")
             self:ClearFocus()
+        else
+            -- No custom text, use dropdown selection
+            MMO:InsertAtCursor(targetDropdownSelection)
         end
     end)
 
@@ -484,26 +645,34 @@ local function RenderTargetContent(parent, yOffset)
     PoolFrame(insertBtn)
 
     insertBtn:SetScript("OnClick", function()
-        local text = input:GetText()
-        if text and text ~= "" then
-            MMO:InsertAtCursor("@" .. text)
+        local customText = input:GetText()
+        if customText and customText ~= "" then
+            -- Custom text takes priority over dropdown
+            if customText:sub(1, 1) ~= "@" then
+                customText = "@" .. customText
+            end
+            MMO:InsertAtCursor(customText)
+            targetCustomText = ""
             input:SetText("")
             input:ClearFocus()
+        else
+            -- Use dropdown selection
+            MMO:InsertAtCursor(targetDropdownSelection)
         end
     end)
 
     insertBtn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Insert Target", 0.4, 0.8, 1)
-        GameTooltip:AddLine("Inserts @<name> at cursor position.", 1, 1, 1, true)
+        GameTooltip:AddLine("Inserts the selected target at cursor position.", 1, 1, 1, true)
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("Common targets:", 0.5, 0.8, 0.5)
-        GameTooltip:AddLine("mouseover, focus, player, target, pet, cursor", 1, 0.82, 0, true)
+        GameTooltip:AddLine("Custom text overrides the dropdown selection.", 0.7, 0.7, 0.7, true)
+        GameTooltip:AddLine("If custom is empty, the dropdown value is used.", 0.7, 0.7, 0.7, true)
         GameTooltip:Show()
     end)
     insertBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    return 28
+    return 60
 end
 
 -- ═══════════════════════════════════════════════════════════════════════
