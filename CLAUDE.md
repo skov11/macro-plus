@@ -47,16 +47,20 @@ macro-plus/
 │   └── CombatLock.lua             ← PLAYER_REGEN_DISABLED/ENABLED handlers
 ├── Engine/
 │   ├── Scraper.lua                ← PLAYER_LOGIN + UPDATE_MACROS scraper
-│   └── Sync.lua                   ← "Copy to Current Char" logic
+│   ├── Sync.lua                   ← "Copy to Current Char" logic
+│   ├── Parser.lua                 ← Macro syntax validation / dry-run parser
+│   └── Shortener.lua              ← Macro body shortening utilities
 ├── UI/
 │   ├── MainFrame.lua              ← Resizable outer window, layout anchor
 │   ├── Sidebar.lua                ← Left panel: char list grouped by realm
 │   ├── MacroGrid.lua              ← Icon grid per character (ScrollFrame)
 │   ├── SearchBar.lua              ← Real-time name+body text filter
 │   ├── Editor.lua                 ← EditBox + highlight overlay + counter
-│   └── CommandPanel.lua           ← /commands buttons + tooltip + insert
+│   ├── CommandPanel.lua           ← /commands buttons + tooltip + insert
+│   └── ConditionBuilder.lua       ← Visual condition group builder popup
 └── Data/
-    └── SlashCommands.lua          ← Static Midnight slash command table
+    ├── SlashCommands.lua          ← Static Midnight slash command table
+    └── Conditions.lua             ← Macro condition definitions
 ```
 
 ## Phase Plan
@@ -65,8 +69,12 @@ macro-plus/
 |-------|-------|------|--------|
 | 1 | TOC, Init, Database, Scraper, CombatLock | Data persists to WTF SavedVariables | ✅ Complete |
 | 2 | MainFrame, Sidebar, MacroGrid, SearchBar | Full UI shell visible in-game | ✅ Complete |
-| 3 | Editor, Sync | Live editing connected to `EditMacro` API | Pending |
-| 4 | SlashCommands, CommandPanel | Encyclopedia with insert-on-click | Pending |
+| 3 | Editor, Sync | Live editing connected to `EditMacro` API | ✅ Complete |
+| 4 | SlashCommands, CommandPanel, ConditionBuilder, Parser, Shortener | Command panel, condition builder, parser, shortener | ✅ Complete |
+| 5A | ImportExport, Sidebar | Clipboard import/export of character macro sets | Planned |
+| 5B | SpecialCommands, CommandPanel | Insert Special scripts & equipment slot references | Planned |
+| 5C | Sharing, ShareDialog, Init, Editor | Send/receive macros via character name or BattleTag | Planned |
+| 5D | ClassMacros, MacroLibrary, Editor | Class/spec-aware common macro library popup | Planned |
 
 ---
 
@@ -101,60 +109,89 @@ MMO_GlobalDB[realm][charName] = {
 - Window auto-hides during combat (no taint risk)
 - Draggable title bar, resize grip at bottom-right
 - **Sidebar** (left panel):
-  - "Shared (Account-wide)" section at top showing all account macros once
-  - Characters grouped by realm
+  - "General" section at top showing account-wide macros with collapsible header
+  - Characters grouped by realm with collapsible headers
   - Current character always appears first
-  - Faction icon (Alliance/Horde) + class icon next to each name
-  - Each character shows only their character-specific macros (6 per row, scrollable grid)
+  - Faction icon (Alliance/Horde) + race icon + class icon next to each name
+  - Each character shows only their character-specific macros (5 per row, scrollable grid)
+  - "New" button under General and current character sections
 - **Search bar** at top of sidebar:
   - Real-time filter by macro name or body text
   - Applies across all characters and grids simultaneously
-- **Macro icons** render in full color, clickable (Phase 3 will add editor load)
+- **Macro icons** render in full color, clickable to load into editor
 
 **Important Notes:**
 - Each character must be logged in at least once and `/reload` to populate their data
-- Icons may show as question marks if character hasn't been logged in since metadata was added (fixed by logging in and `/reload` on that character)
 
 ---
 
-### 🚧 Phase 3: Editor & Sync (NEXT)
-**Files to Build:** `UI/Editor.lua`, `Engine/Sync.lua`
+### ✅ Phase 3: Editor & Sync (COMPLETE)
+**Files:** `UI/Editor.lua`, `Engine/Sync.lua`
 
-**Goals:**
-1. **Editor (right panel, top section):**
-   - Multi-line EditBox for macro editing
-   - Syntax highlighting overlay (simulated via FontString)
-   - Character counter (0/255 display, real-time)
-   - "Dry run" parser to validate commands
-   - Save button → calls `EditMacro()` for current character only
-   - Read-only mode for viewing alt macros
+**What's Working:**
+- **Editor (right panel, top section):**
+  - Multi-line EditBox with syntax highlighting overlay (FontString)
+  - Real-time character counter (0/255 display)
+  - Header row: icon, name box, Change Icon, Conditions, Shorten, Save, Delete buttons
+  - "Dry run" parser validates macro commands on text change
+  - Save button → calls `EditMacro()` for current character only
+  - Delete button with confirmation
+  - Read-only mode for viewing alt macros with "Copy to Mine" button
+- **Sync Logic:**
+  - "Copy to Mine" button appears when viewing alt macros
+  - Calls `CreateMacro()` to copy macro to logged-in character
+  - Refreshes sidebar after copy
 
-2. **Sync Logic:**
-   - "Copy to Current Character" button
-   - Allows copying any alt's macro to the logged-in character
-   - Calls `CreateMacro()` or `EditMacro()` to write locally
-
-**Click Flow (to implement):**
+**Click Flow:**
 - Click macro icon in sidebar → loads into editor
-- If it's an alt macro → read-only mode
-- If it's current character macro → editable mode
+- Alt macro → read-only mode with "Copy to Mine"
+- Current character macro → full edit mode
 
 ---
 
-### 🚧 Phase 4: Command Encyclopedia (FINAL)
-**Files to Build:** `Data/SlashCommands.lua`, `UI/CommandPanel.lua`
+### ✅ Phase 4: Command Panel, Condition Builder, Parser, Shortener (COMPLETE)
+**Files:** `Data/SlashCommands.lua`, `Data/Conditions.lua`, `UI/CommandPanel.lua`, `UI/ConditionBuilder.lua`, `Engine/Parser.lua`, `Engine/Shortener.lua`
 
-**Goals:**
-1. **SlashCommands.lua:**
-   - Static Lua table with all Midnight slash commands
-   - Categories: Combat, Utility, Targeting, System, Housing, Sky-riding
-   - Each entry: `{ command, description, syntax }`
+**What's Working:**
+- **Command Panel (right panel, bottom section):**
+  - Scrollable button grid of slash commands grouped by category
+  - Category dropdown filter + search box
+  - Hover → tooltip shows syntax, aliases, and description
+  - Click → inserts command at cursor in editor
+- **Condition Builder:**
+  - Visual popup for building macro condition groups (e.g., `[@mouseover,help,nodead]`)
+  - Multi-group support with tab bar (add/remove groups)
+  - Target dropdown + up to 5 condition rows with negation and argument fields
+  - Live syntax preview + plain English summary translation
+  - Auto-refreshes when selecting a different macro
+  - Insert button pastes condition string into editor
+- **Parser:** Validates macro syntax on each text change, shows inline error messages
+- **Shortener:** Compresses macro body to save character count
 
-2. **CommandPanel (right panel, bottom section):**
-   - Scrollable list of command buttons grouped by category
-   - Search filter box
-   - Hover → tooltip shows syntax and description
-   - Click button → inserts command at cursor in editor
+---
+
+### 🚧 Phase 5: Advanced Features (PLANNED)
+See plan file at `.claude/plans/golden-brewing-tide.md` for full details.
+
+**5A — Import/Export:**
+- Export a character's macros to clipboard as a serialized string
+- Import macros from clipboard into General or current character
+- Export button on every character, Import button next to New buttons
+
+**5B — Insert Special / Insert Slot:**
+- Split bottom command panel into two columns
+- Left: existing slash commands. Right: special script snippets + equipment slot references
+- One-click insert of `/run` scripts and equipment slot numbers
+
+**5C — Macro Sharing:**
+- Send macros to other MacroPlus users via character name or BattleTag
+- Uses WoW addon messaging (`C_ChatInfo.SendAddonMessage` / `BNSendGameData`)
+- Receiver gets Accept/Decline popup with macro preview
+
+**5D — Commonly Used Macros:**
+- Class/spec-aware macro library popup with PvE/PvP filter
+- Curated macros with descriptions and one-click copy to character
+- Data populated from external scraping (in progress)
 
 ---
 
