@@ -1,6 +1,6 @@
 local _, MMO = ...
 
--- ─── Macro Library: Class/Spec-aware curated macro browser ───────────
+-- ─── Recommended Macros: Class/Spec-aware curated macro browser ─────
 
 local MAX_CHARACTER_MACROS = 18
 
@@ -42,10 +42,27 @@ local CLASS_DISPLAY = {
     EVOKER      = "Evoker",
 }
 
+local CLASS_SPECS = {
+    WARRIOR     = { "Arms", "Fury", "Protection" },
+    PALADIN     = { "Holy", "Protection", "Retribution" },
+    HUNTER      = { "Beast Mastery", "Marksmanship", "Survival" },
+    ROGUE       = { "Assassination", "Outlaw", "Subtlety" },
+    PRIEST      = { "Discipline", "Holy", "Shadow" },
+    DEATHKNIGHT = { "Blood", "Frost", "Unholy" },
+    SHAMAN      = { "Elemental", "Enhancement", "Restoration" },
+    MAGE        = { "Arcane", "Fire", "Frost" },
+    WARLOCK     = { "Affliction", "Demonology", "Destruction" },
+    MONK        = { "Brewmaster", "Mistweaver", "Windwalker" },
+    DRUID       = { "Balance", "Feral", "Guardian", "Restoration" },
+    DEMONHUNTER = { "Havoc", "Vengeance" },
+    EVOKER      = { "Augmentation", "Devastation", "Preservation" },
+}
+
 -- State
 local libraryFrame
 local selectedClass
 local selectedSpec
+local selectedMode = "pve"  -- "pve" or "pvp"
 local searchText = ""
 
 -- References to dynamic UI elements
@@ -55,6 +72,79 @@ local cardFrames = {}
 local searchBox
 local specTabContainer
 local cardScrollFrame, cardScrollChild
+local pveBtnRef, pvpBtnRef
+local icyVeinsBtnRef
+
+-- ─── URL Copy Dialog ────────────────────────────────────────────────
+-- WoW addons cannot open a browser directly (LaunchURL removed from addon env).
+-- Custom dialog with EditBox — player presses Ctrl+C to copy, then pastes in browser.
+
+local urlDialog
+
+local function CreateURLDialog()
+    local f = CreateFrame("Frame", "MacroPlusURLDialog", UIParent, "BackdropTemplate")
+    f:SetSize(440, 90)
+    f:SetPoint("CENTER", 0, 150)
+    f:SetFrameStrata("TOOLTIP")
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:Hide()
+
+    f:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile     = true,
+        tileSize = 32,
+        edgeSize = 24,
+        insets   = { left = 8, right = 8, top = 8, bottom = 8 },
+    })
+
+    f:SetScript("OnMouseDown", function(self) self:StartMoving() end)
+    f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
+
+    local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    label:SetPoint("TOPLEFT", 16, -14)
+    label:SetText("|cff69ccf0Copy this URL (Ctrl+C) and paste in your browser:|r")
+
+    local eb = CreateFrame("EditBox", nil, f, "BackdropTemplate")
+    eb:SetPoint("TOPLEFT", 16, -32)
+    eb:SetPoint("RIGHT", -16, 0)
+    eb:SetHeight(22)
+    eb:SetFontObject(ChatFontNormal)
+    eb:SetAutoFocus(false)
+    eb:SetTextColor(1, 1, 1)
+    eb:SetBackdrop({
+        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+        insets   = { left = 4, right = 4, top = 2, bottom = 2 },
+    })
+    eb:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.8)
+    eb:SetScript("OnEscapePressed", function() f:Hide() end)
+    eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    eb:SetScript("OnMouseUp", function(self) self:HighlightText() end)
+    -- Keep read-only: revert any typing
+    eb:SetScript("OnChar", function(self)
+        self:SetText(self.savedURL or "")
+        self:HighlightText()
+    end)
+    eb:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then
+            self:SetText(self.savedURL or "")
+            self:HighlightText()
+        end
+    end)
+    f.editBox = eb
+
+    local doneBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    doneBtn:SetSize(60, 20)
+    doneBtn:SetPoint("BOTTOM", 0, 12)
+    doneBtn:SetText("Done")
+    doneBtn:SetScript("OnClick", function() f:Hide() end)
+    MMO:StyleButton(doneBtn)
+
+    urlDialog = f
+end
 
 -- ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -64,25 +154,63 @@ local function GetPlayerClass()
 end
 
 local function GetSpecsForClass(classID)
-    local data = MMO.ClassMacros and MMO.ClassMacros[classID]
-    if not data then return {} end
     local specs = {}
-    for specName, _ in pairs(data) do
-        specs[#specs + 1] = specName
+
+    -- Check if "General" exists in macro data for this mode
+    local data = MMO.ClassMacros and MMO.ClassMacros[classID]
+    if data then
+        local modeData = data[selectedMode]
+        if modeData and modeData["General"] and #modeData["General"] > 0 then
+            specs[#specs + 1] = "General"
+        end
     end
-    -- Sort: General first, then alphabetical
-    table.sort(specs, function(a, b)
-        if a == "General" then return true end
-        if b == "General" then return false end
-        return a < b
-    end)
+
+    -- Always show all specs for the class from the hardcoded list
+    local classSpecs = CLASS_SPECS[classID]
+    if classSpecs then
+        for _, specName in ipairs(classSpecs) do
+            specs[#specs + 1] = specName
+        end
+    end
+
     return specs
 end
 
 local function GetMacrosForSpec(classID, specName)
     local data = MMO.ClassMacros and MMO.ClassMacros[classID]
-    if not data or not data[specName] then return {} end
-    return data[specName]
+    if not data then return {} end
+    local modeData = data[selectedMode]
+    if not modeData or not modeData[specName] then return {} end
+    return modeData[specName]
+end
+
+local function GetIcyVeinsURL(classID, specName)
+    -- Try scraped URL first
+    local urlData = MMO.ClassMacroURLs and MMO.ClassMacroURLs[classID]
+    if urlData then
+        local modeUrls = urlData[selectedMode]
+        if modeUrls and modeUrls[specName] then
+            return modeUrls[specName]
+        end
+    end
+
+    -- Fallback: build URL from class/spec/mode pattern
+    if specName == "General" then return nil end
+    local className = (CLASS_DISPLAY[classID] or ""):lower():gsub(" ", "-")
+    local specLower = specName:lower():gsub(" ", "-")
+    if selectedMode == "pvp" then
+        return "https://www.icy-veins.com/wow/" .. specLower .. "-" .. className .. "-pvp-useful-macros"
+    end
+    -- PvE: determine role for URL
+    local HEALER_SPECS = { Holy = true, Discipline = true, Restoration = true, Mistweaver = true, Preservation = true }
+    local TANK_SPECS = { Protection = true, Blood = true, Guardian = true, Vengeance = true, Brewmaster = true }
+    local role = "dps"
+    if HEALER_SPECS[specName] then
+        role = "healing"
+    elseif TANK_SPECS[specName] then
+        role = "tank"
+    end
+    return "https://www.icy-veins.com/wow/" .. specLower .. "-" .. className .. "-pve-" .. role .. "-macros-addons"
 end
 
 local function FilterMacros(macros, query)
@@ -137,7 +265,6 @@ local function BuildClassList(parent)
             btn:SetScript("OnClick", function()
                 selectedClass = classID
                 RefreshClassHighlight()
-                -- Reset to first spec
                 local specs = GetSpecsForClass(classID)
                 selectedSpec = specs[1] or "General"
                 searchText = ""
@@ -151,6 +278,23 @@ local function BuildClassList(parent)
     end
 
     parent:SetHeight(math.max(yOffset, 1))
+end
+
+-- ─── PvE/PvP Toggle ─────────────────────────────────────────────────
+
+local function RefreshModeButtons()
+    if not pveBtnRef or not pvpBtnRef then return end
+    if selectedMode == "pve" then
+        pveBtnRef.bg:SetColorTexture(0.2, 0.35, 0.2, 1.0)
+        pveBtnRef.label:SetTextColor(0.4, 1.0, 0.4)
+        pvpBtnRef.bg:SetColorTexture(0.15, 0.15, 0.15, 0.8)
+        pvpBtnRef.label:SetTextColor(0.6, 0.6, 0.6)
+    else
+        pveBtnRef.bg:SetColorTexture(0.15, 0.15, 0.15, 0.8)
+        pveBtnRef.label:SetTextColor(0.6, 0.6, 0.6)
+        pvpBtnRef.bg:SetColorTexture(0.4, 0.15, 0.15, 1.0)
+        pvpBtnRef.label:SetTextColor(1.0, 0.4, 0.4)
+    end
 end
 
 -- ─── Spec Tabs ────────────────────────────────────────────────────────
@@ -182,7 +326,10 @@ local function BuildSpecTabs(specs)
     local xOffset = 0
     for _, specName in ipairs(specs) do
         local tab = CreateFrame("Button", nil, specTabContainer)
-        local textWidth = GameFontNormalSmall:GetStringWidth(specName) or 50
+        local measureFS = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        measureFS:SetText(specName)
+        local textWidth = measureFS:GetStringWidth() or 50
+        measureFS:Hide()
         local tabWidth = math.max(textWidth + 16, 50)
         tab:SetSize(tabWidth, 22)
         tab:SetPoint("TOPLEFT", xOffset, 0)
@@ -206,6 +353,15 @@ local function BuildSpecTabs(specs)
         tab:SetScript("OnClick", function()
             selectedSpec = specName
             RefreshSpecTabHighlight()
+            -- Update Icy Veins button for new spec
+            if icyVeinsBtnRef then
+                local url = GetIcyVeinsURL(selectedClass, specName)
+                if url then
+                    icyVeinsBtnRef:Show()
+                else
+                    icyVeinsBtnRef:Hide()
+                end
+            end
             MMO:RefreshMacroCardList()
         end)
 
@@ -229,12 +385,6 @@ local function ClearCards()
     wipe(cardFrames)
 end
 
-local function TruncateString(str, maxLen)
-    if not str then return "" end
-    if #str <= maxLen then return str end
-    return str:sub(1, maxLen) .. "..."
-end
-
 local function CreateMacroCard(parent, macro, index, totalWidth)
     local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     local cardWidth = totalWidth - 4
@@ -250,11 +400,12 @@ local function CreateMacroCard(parent, macro, index, totalWidth)
     })
     card:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.6)
 
-    -- Name (gold)
+    -- Name (gold, single line, truncated with ellipsis if too long)
     local nameLabel = card:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     nameLabel:SetPoint("TOPLEFT", 8, -6)
     nameLabel:SetPoint("TOPRIGHT", -70, -6)
     nameLabel:SetJustifyH("LEFT")
+    nameLabel:SetWordWrap(false)
     nameLabel:SetText("|cffffd100" .. (macro.name or "Unnamed") .. "|r")
 
     -- Description (white, small)
@@ -267,7 +418,7 @@ local function CreateMacroCard(parent, macro, index, totalWidth)
     if descText == "" then
         descText = "No description available."
     end
-    descLabel:SetText(TruncateString(descText, 90))
+    descLabel:SetText(descText)
     descLabel:SetTextColor(0.85, 0.85, 0.85)
 
     -- Body preview (gray, small)
@@ -277,7 +428,7 @@ local function CreateMacroCard(parent, macro, index, totalWidth)
     bodyLabel:SetJustifyH("LEFT")
     bodyLabel:SetWordWrap(false)
     local bodyPreview = (macro.body or ""):gsub("\n", " | ")
-    bodyLabel:SetText("|cff888888" .. TruncateString(bodyPreview, 80) .. "|r")
+    bodyLabel:SetText("|cff888888" .. bodyPreview .. "|r")
 
     -- Copy button
     local copyBtn = CreateFrame("Button", nil, card, "UIPanelButtonTemplate")
@@ -316,11 +467,11 @@ local function CreateMacroCard(parent, macro, index, totalWidth)
             if MMO.RefreshSidebar then
                 MMO:RefreshSidebar()
             end
-            print("|cff00ccff[MacroPlus]|r Copied '" .. macroName .. "' to your character macros.")
+            print("|cff00ccff[MacroPlus]|r Copied '" .. (macro.name or "New") .. "' to your character macros.")
         end
     end)
 
-    -- Tooltip on hover over the card body area
+    -- Tooltip on hover
     card:EnableMouse(true)
     card:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -330,7 +481,6 @@ local function CreateMacroCard(parent, macro, index, totalWidth)
         end
         GameTooltip:AddLine(" ", 1, 1, 1)
         GameTooltip:AddLine("Macro body:", 0.5, 0.5, 0.5)
-        -- Show full body in tooltip, split by lines
         local lines = { strsplit("\n", macro.body or "") }
         for _, line in ipairs(lines) do
             GameTooltip:AddLine("|cff69ccf0" .. line .. "|r", nil, nil, nil, false)
@@ -363,13 +513,20 @@ function MMO:RefreshMacroCardList()
     local totalHeight = #macros * (CARD_HEIGHT + CARD_PAD)
     cardScrollChild:SetHeight(math.max(totalHeight, 1))
 
-    -- Show empty state if no macros
     if #macros == 0 then
         if not cardScrollChild.emptyText then
             local empty = cardScrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
             empty:SetPoint("TOP", 0, -20)
-            empty:SetText("|cff888888No macros found.|r")
+            empty:SetWidth(cardScrollChild:GetWidth() - 20)
+            empty:SetJustifyH("CENTER")
+            empty:SetWordWrap(true)
             cardScrollChild.emptyText = empty
+        end
+        local url = GetIcyVeinsURL(selectedClass, selectedSpec)
+        if url then
+            cardScrollChild.emptyText:SetText("|cff888888No " .. selectedMode:upper() .. " macros found.\nClick |cff69ccf0Icy Veins|r|cff888888 above for the full guide.|r")
+        else
+            cardScrollChild.emptyText:SetText("|cff888888No " .. selectedMode:upper() .. " macros found.|r")
         end
         cardScrollChild.emptyText:Show()
     elseif cardScrollChild.emptyText then
@@ -380,11 +537,9 @@ end
 function MMO:RefreshMacroLibraryContent()
     if not selectedClass then return end
 
-    -- Rebuild spec tabs
     local specs = GetSpecsForClass(selectedClass)
     BuildSpecTabs(specs)
 
-    -- Ensure selectedSpec is valid
     local specValid = false
     for _, s in ipairs(specs) do
         if s == selectedSpec then
@@ -396,19 +551,69 @@ function MMO:RefreshMacroLibraryContent()
         selectedSpec = specs[1] or "General"
     end
     RefreshSpecTabHighlight()
-
-    -- Refresh class highlight
     RefreshClassHighlight()
+    RefreshModeButtons()
 
-    -- Rebuild card list
+    -- Update Icy Veins button visibility
+    if icyVeinsBtnRef then
+        local url = GetIcyVeinsURL(selectedClass, selectedSpec)
+        if url then
+            icyVeinsBtnRef:Show()
+        else
+            icyVeinsBtnRef:Hide()
+        end
+    end
+
     self:RefreshMacroCardList()
 end
 
 -- ─── Create the Library Frame ─────────────────────────────────────────
 
+local function CreateModeButton(parent, label, x, mode)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(50, 20)
+    btn:SetPoint("TOPLEFT", x, 0)
+
+    local bg = btn:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.15, 0.15, 0.15, 0.8)
+    btn.bg = bg
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(0.4, 0.4, 0.4, 0.3)
+
+    local lbl = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("CENTER", 0, 0)
+    lbl:SetText(label)
+    btn.label = lbl
+
+    btn:SetScript("OnClick", function()
+        if selectedMode == mode then return end
+        selectedMode = mode
+        -- Reset spec selection for new mode
+        local specs = GetSpecsForClass(selectedClass)
+        selectedSpec = specs[1] or "General"
+        searchText = ""
+        if searchBox then searchBox:SetText("") end
+        MMO:RefreshMacroLibraryContent()
+    end)
+
+    return btn
+end
+
+local function OpenIcyVeinsURL(url)
+    if not urlDialog then CreateURLDialog() end
+    urlDialog.editBox.savedURL = url
+    urlDialog.editBox:SetText(url)
+    urlDialog:Show()
+    urlDialog.editBox:SetFocus()
+    urlDialog.editBox:HighlightText()
+end
+
 local function CreateLibraryFrame()
     local f = CreateFrame("Frame", "MacroPlusLibrary", UIParent, "BackdropTemplate")
-    f:SetSize(580, 500)
+    f:SetSize(620, 500)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:EnableMouse(true)
@@ -427,7 +632,7 @@ local function CreateLibraryFrame()
     -- Title
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     title:SetPoint("TOP", 0, -16)
-    title:SetText("Macro Library")
+    title:SetText("Recommended Macros")
 
     -- Close button
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -444,28 +649,69 @@ local function CreateLibraryFrame()
     vSep:SetWidth(1)
     vSep:SetColorTexture(0.4, 0.4, 0.4, 0.6)
 
-    -- ─── Left panel: class list ───
-    local classScroll = CreateFrame("ScrollFrame", "MacroPlusLibClassScroll", f, "UIPanelScrollFrameTemplate")
-    classScroll:SetPoint("TOPLEFT", 14, -40)
-    classScroll:SetPoint("BOTTOMLEFT", 14, 14)
-    classScroll:SetWidth(108)
+    -- ─── Left panel: class list (plain frame, no scrollbar) ───
+    local classPanel = CreateFrame("Frame", nil, f)
+    classPanel:SetPoint("TOPLEFT", 14, -40)
+    classPanel:SetPoint("BOTTOMLEFT", 14, 14)
+    classPanel:SetWidth(108)
 
-    local classChild = CreateFrame("Frame", nil, classScroll)
-    classChild:SetWidth(108)
-    classChild:SetHeight(1)
-    classScroll:SetScrollChild(classChild)
-
-    BuildClassList(classChild)
+    BuildClassList(classPanel)
 
     -- ─── Right panel ───
     local rightPanel = CreateFrame("Frame", nil, f)
     rightPanel:SetPoint("TOPLEFT", vSep, "TOPRIGHT", 4, 0)
     rightPanel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 14)
 
-    -- Spec tab container
+    -- PvE / PvP toggle row
+    local modeContainer = CreateFrame("Frame", nil, rightPanel)
+    modeContainer:SetPoint("TOPLEFT", 0, 0)
+    modeContainer:SetPoint("TOPRIGHT", 0, 0)
+    modeContainer:SetHeight(22)
+
+    pveBtnRef = CreateModeButton(modeContainer, "PvE", 0, "pve")
+    pvpBtnRef = CreateModeButton(modeContainer, "PvP", 54, "pvp")
+
+    -- Icy Veins link button (right-aligned in mode row)
+    local ivBtn = CreateFrame("Button", nil, modeContainer)
+    ivBtn:SetSize(80, 20)
+    ivBtn:SetPoint("TOPRIGHT", 0, 0)
+
+    local ivBg = ivBtn:CreateTexture(nil, "BACKGROUND")
+    ivBg:SetAllPoints()
+    ivBg:SetColorTexture(0.12, 0.18, 0.28, 1.0)
+    ivBtn.bg = ivBg
+
+    local ivHl = ivBtn:CreateTexture(nil, "HIGHLIGHT")
+    ivHl:SetAllPoints()
+    ivHl:SetColorTexture(0.3, 0.4, 0.5, 0.4)
+
+    local ivLabel = ivBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ivLabel:SetPoint("CENTER", 0, 0)
+    ivLabel:SetText("|cff69ccf0Icy Veins|r")
+    ivBtn.label = ivLabel
+
+    ivBtn:SetScript("OnClick", function()
+        local url = GetIcyVeinsURL(selectedClass, selectedSpec)
+        if url then
+            OpenIcyVeinsURL(url)
+        end
+    end)
+    ivBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("View on Icy Veins", 0.41, 0.8, 0.94)
+        GameTooltip:AddLine("Copy the Icy Veins macro guide URL to your clipboard", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    ivBtn:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    icyVeinsBtnRef = ivBtn
+
+    -- Spec tab container (below mode toggle)
     specTabContainer = CreateFrame("Frame", nil, rightPanel)
-    specTabContainer:SetPoint("TOPLEFT", 0, 0)
-    specTabContainer:SetPoint("TOPRIGHT", 0, 0)
+    specTabContainer:SetPoint("TOPLEFT", modeContainer, "BOTTOMLEFT", 0, -4)
+    specTabContainer:SetPoint("TOPRIGHT", modeContainer, "BOTTOMRIGHT", 0, -4)
     specTabContainer:SetHeight(24)
 
     -- Search bar
@@ -515,7 +761,6 @@ local function CreateLibraryFrame()
     cardScrollChild:SetHeight(1)
     cardScrollFrame:SetScrollChild(cardScrollChild)
 
-    -- Update card scroll child width when scroll frame resizes
     cardScrollFrame:SetScript("OnSizeChanged", function(self, w, h)
         cardScrollChild:SetWidth(w)
     end)
@@ -524,6 +769,7 @@ local function CreateLibraryFrame()
     MMO:RegisterCombatListener("MacroLibrary", function(inCombat)
         if inCombat and f:IsShown() then
             f:Hide()
+
         end
     end)
 
@@ -545,9 +791,10 @@ function MMO:ToggleMacroLibrary()
 
     if libraryFrame:IsShown() then
         libraryFrame:Hide()
+
     else
-        -- Auto-select player's class on open
         selectedClass = GetPlayerClass()
+        selectedMode = "pve"
         local specs = GetSpecsForClass(selectedClass)
         selectedSpec = specs[1] or "General"
         searchText = ""
