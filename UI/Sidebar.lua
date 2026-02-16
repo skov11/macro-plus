@@ -27,8 +27,16 @@ local function CreateSidebarUI(parent)
     scrollFrame:SetPoint("BOTTOMRIGHT", -24, 0)
 
     scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetSize(scrollFrame:GetWidth(), 1)
+    scrollChild:SetHeight(1)
     scrollFrame:SetScrollChild(scrollChild)
+
+    -- Set scroll child width to match scroll frame (deferred to ensure layout)
+    scrollFrame:SetScript("OnSizeChanged", function(self, w, h)
+        scrollChild:SetWidth(w)
+    end)
+    -- Initial width (fallback)
+    local parentWidth = parent:GetWidth()
+    scrollChild:SetWidth(parentWidth > 0 and (parentWidth - 24) or 220)
 
     MMO.sidebarScrollChild = scrollChild
 
@@ -136,10 +144,51 @@ local function CreateNewMacroButton(parent, yOffset, isAccount)
     return btn
 end
 
+local function CreateImportButton(parent, yOffset, isAccount)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(70, 20)
+    btn:SetPoint("TOPLEFT", 92, yOffset)
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:SetText("Import")
+    btn:SetScript("OnClick", function()
+        if MMO.ShowImportDialog then
+            MMO:ShowImportDialog(isAccount)
+        end
+    end)
+    MMO:StyleButton(btn)
+    return btn
+end
+
+local function CreateExportButton(parent, realm, charName, isAccountSection)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(52, 18)
+    btn:SetPoint("RIGHT", -2, 0)
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    btn:SetText("Export")
+    btn:SetNormalFontObject(GameFontNormalSmall)
+    btn:SetHighlightFontObject(GameFontHighlightSmall)
+    btn:SetScript("OnClick", function(self, button, down)
+        -- Stop click from propagating to the parent collapse button
+        if MMO.ExportCharacterMacros then
+            MMO:ExportCharacterMacros(realm, charName, isAccountSection)
+        end
+    end)
+    MMO:StyleButton(btn)
+    return btn
+end
+
+local function GetSidebarContentWidth()
+    if scrollChild then
+        return scrollChild:GetWidth() - 8  -- 8px padding
+    end
+    return 220
+end
+
 local function CreateCollapsibleHeader(parent, text, color, isExpanded, yOffset, onClick)
     local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(220, 24)
     btn:SetPoint("TOPLEFT", 8, yOffset)
+    btn:SetPoint("RIGHT", parent, "RIGHT", -4, 0)
+    btn:SetHeight(24)
 
     local arrow = CreateCollapseArrow(btn, isExpanded)
     arrow:SetPoint("LEFT", 0, 0)
@@ -175,6 +224,7 @@ function MMO:RefreshSidebar()
 
         if isExpanded then
             CreateNewMacroButton(scrollChild, yOffset, true)
+            CreateImportButton(scrollChild, yOffset, true)
             yOffset = yOffset - 28
             local gridHeight = CreateMacroGridPlaceholder(scrollChild, currentRealm, currentChar, true, yOffset)
             yOffset = yOffset - (gridHeight + 16)
@@ -214,8 +264,9 @@ function MMO:RefreshSidebar()
 
                 -- Character button
                 local btn = CreateFrame("Button", nil, scrollChild)
-                btn:SetSize(220, 30)
                 btn:SetPoint("TOPLEFT", 16, yOffset)
+                btn:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+                btn:SetHeight(30)
 
                 local bg = btn:CreateTexture(nil, "BACKGROUND")
                 bg:SetAllPoints()
@@ -275,6 +326,9 @@ function MMO:RefreshSidebar()
                     label:SetText(charName)
                 end
 
+                -- Export button (right-aligned on every character row)
+                local exportBtn = CreateExportButton(btn, realm, charName, false)
+
                 -- Click toggles collapse
                 btn:SetScript("OnClick", function()
                     collapsedChars[charKey] = not collapsedChars[charKey]
@@ -295,6 +349,7 @@ function MMO:RefreshSidebar()
                 if charExpanded then
                     if isCurrent then
                         CreateNewMacroButton(scrollChild, yOffset, false)
+                        CreateImportButton(scrollChild, yOffset, false)
                         yOffset = yOffset - 28
                     end
                     local gridHeight = CreateMacroGridPlaceholder(scrollChild, realm, charName, false, yOffset)

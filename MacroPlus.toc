@@ -9,6 +9,7 @@ Core\Init.lua
 Core\Database.lua
 Core\CombatLock.lua
 Engine\Scraper.lua
+Engine\ImportExport.lua
 UI\MainFrame.lua
 UI\Sidebar.lua
 UI\MacroGrid.lua
