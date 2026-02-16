@@ -47,6 +47,8 @@ macro-plus/
 │   └── CombatLock.lua             ← PLAYER_REGEN_DISABLED/ENABLED handlers
 ├── Engine/
 │   ├── Scraper.lua                ← PLAYER_LOGIN + UPDATE_MACROS scraper
+│   ├── ImportExport.lua           ← Serialize/deserialize macros, export/import dialogs
+│   ├── Sharing.lua                ← Send/receive macros via addon messaging
 │   ├── Sync.lua                   ← "Copy to Current Char" logic
 │   ├── Parser.lua                 ← Macro syntax validation / dry-run parser
 │   └── Shortener.lua              ← Macro body shortening utilities
@@ -56,11 +58,15 @@ macro-plus/
 │   ├── MacroGrid.lua              ← Icon grid per character (ScrollFrame)
 │   ├── SearchBar.lua              ← Real-time name+body text filter
 │   ├── Editor.lua                 ← EditBox + highlight overlay + counter
+│   ├── ShareDialog.lua            ← Send dialog + accept/decline popup
 │   ├── CommandPanel.lua           ← /commands buttons + tooltip + insert
-│   └── ConditionBuilder.lua       ← Visual condition group builder popup
+│   ├── ConditionBuilder.lua       ← Visual condition group builder popup
+│   └── MacroLibrary.lua           ← (5D) Class/spec macro library popup
 └── Data/
     ├── SlashCommands.lua          ← Static Midnight slash command table
-    └── Conditions.lua             ← Macro condition definitions
+    ├── Conditions.lua             ← Macro condition definitions
+    ├── SpecialCommands.lua        ← Special scripts, equipment slots, raid markers
+    └── ClassMacros.lua            ← (5D) Curated class/spec macro definitions
 ```
 
 ## Phase Plan
@@ -71,10 +77,11 @@ macro-plus/
 | 2 | MainFrame, Sidebar, MacroGrid, SearchBar | Full UI shell visible in-game | ✅ Complete |
 | 3 | Editor, Sync | Live editing connected to `EditMacro` API | ✅ Complete |
 | 4 | SlashCommands, CommandPanel, ConditionBuilder, Parser, Shortener | Command panel, condition builder, parser, shortener | ✅ Complete |
-| 5A | ImportExport, Sidebar | Clipboard import/export of character macro sets | Planned |
+| 5A | ImportExport, Sidebar | Clipboard import/export of character macro sets | ✅ Complete |
 | 5B | SpecialCommands, CommandPanel | Collapsible sections: Commands, Special, Slots, Markers, Target | ✅ Complete |
-| 5C | Sharing, ShareDialog, Init, Editor | Send/receive macros via character name or BattleTag | Planned |
+| 5C | Sharing, ShareDialog, Init, Editor | Send/receive macros via character name or BattleTag | ✅ Complete |
 | 5D | ClassMacros, MacroLibrary, Editor | Class/spec-aware common macro library popup | Planned |
+| 5E | SpecialCommands, CommandPanel | Command panel rework — match MacroToolkit feature parity | Planned |
 
 ---
 
@@ -170,29 +177,237 @@ MMO_GlobalDB[realm][charName] = {
 
 ---
 
-### 🚧 Phase 5: Advanced Features (PLANNED)
-See plan file at `.claude/plans/golden-brewing-tide.md` for full details.
+### ✅ Phase 5A: Import/Export (COMPLETE)
+**Files:** `Engine/ImportExport.lua`, `UI/Sidebar.lua`
 
-**5A — Import/Export:**
-- Export a character's macros to clipboard as a serialized string
+**What's Working:**
+- Export a character's macros to clipboard as a serialized `MPX1:` string
 - Import macros from clipboard into General or current character
-- Export button on every character, Import button next to New buttons
+- Export button on every character header and General section
+- Import button next to New buttons
+- EditBox escaping handles WoW's automatic `|` → `||` doubling
+- `ResolveIconForCreateMacro` helper ensures icons round-trip correctly
+- Token-based escape/unescape prevents cross-contamination
 
-**5B — Command Panel Collapsible Sections:** ✅
+### ✅ Phase 5B: Command Panel Collapsible Sections (COMPLETE)
+**Files:** `Data/SpecialCommands.lua`, `UI/CommandPanel.lua`
+
+**What's Working:**
 - Single scrollable panel with 5 collapsible sections: Commands, Insert Special, Equipment Slots, Raid Markers, Target
 - Commands expanded by default with inline category dropdown + search; all others collapsed
 - Each section: clickable header with collapse arrow + gold label, full-width button grids when expanded
 - Insert Special/Slots/Markers render as button grids; Target has inline text input + Insert button
 
-**5C — Macro Sharing:**
-- Send macros to other MacroPlus users via character name or BattleTag
-- Uses WoW addon messaging (`C_ChatInfo.SendAddonMessage` / `BNSendGameData`)
-- Receiver gets Accept/Decline popup with macro preview
+### ✅ Phase 5C: Macro Sharing (COMPLETE)
+**Files:** `Engine/Sharing.lua`, `UI/ShareDialog.lua`, `Core/Init.lua`, `UI/Editor.lua`
 
-**5D — Commonly Used Macros:**
-- Class/spec-aware macro library popup with PvE/PvP filter
-- Curated macros with descriptions and one-click copy to character
-- Data populated from external scraping (in progress)
+**What's Working:**
+- Send macros to other MacroPlus users via character name or BattleTag
+- Uses `C_ChatInfo.SendAddonMessage` (whisper, chunked at 245 bytes) and `BNSendGameData` (BattleTag)
+- `MPLUS` addon message prefix registered on load
+- Receiver gets Accept/Decline popup with macro icon, name, body preview, and sender name
+- Incoming macro queue: multiple macros queued and shown one at a time
+- BNet sender name resolved via `C_BattleNet.GetGameAccountInfoByID` + friend list iteration
+- Combat safety: dialog auto-hides on combat start, re-shows when combat ends
+- Share button visible for both current character and offline alt macros
+- 30-second reassembly timeout for chunked messages
+
+### 🚧 Phase 5D: Class/Spec Macro Library (PLANNED)
+**Files:** `Data/ClassMacros.lua` (new), `UI/MacroLibrary.lua` (new), `UI/Editor.lua`, `MacroPlus.toc`
+
+**Goal:** A popup window with curated, class/spec-aware macros that users can browse and one-click copy to their character.
+
+**Data Structure (`Data/ClassMacros.lua`):**
+```lua
+MMO.ClassMacros = {
+    WARRIOR = {
+        Arms = {
+            { name = "Bladestorm Focus", body = "/cast [@focus] Bladestorm", desc = "Bladestorm on focus target", tags = {"PvP"} },
+        },
+        Fury = { ... },
+        Protection = { ... },
+        General = { ... },  -- class-wide macros, any spec
+    },
+    PRIEST = { ... },
+    -- ...
+}
+```
+
+**UI (`UI/MacroLibrary.lua`):**
+- Popup frame (~500×450, centered, movable, FULLSCREEN_DIALOG)
+- **Left column:** Class list (auto-detects current class, highlights it, shows all classes)
+- **Top bar:** Spec tabs (populated dynamically from selected class) + "General" tab + PvE/PvP filter toggle
+- **Body:** Scrollable list of macro cards, each showing: name, description, truncated body preview, tags
+- **Per-card buttons:** "Copy to Mine" → calls `CreateMacro()`, "Preview" → loads into editor read-only
+- **Search bar** at top for filtering by name/body/description
+
+**Editor Integration:**
+- Add "Library" button to editor header row (after Share button)
+- Button opens the MacroLibrary popup
+- Clicking "Preview" in library loads macro into editor in read-only preview mode
+
+**Data Population:**
+- Curated from `scrape/recommended_macros.json` (already scraped from Icy Veins)
+- Static data shipped with the addon — no runtime fetching
+- Structured by class → spec → macro entries
+
+---
+
+### 🚧 Phase 5E: Command Panel Rework (PLANNED)
+**Files:** `Data/SpecialCommands.lua`, `UI/CommandPanel.lua`
+**Reference:** `research/macrotoolkit-insert-special-slot-report.md`
+
+**Goal:** Rework the bottom command panel to match MacroToolkit's feature parity while keeping MacroPlus's superior design (self-contained `/run` snippets, no addon dependency, collapsible sections).
+
+#### 5E-1: Character Limit Pre-Check on Insert
+**File:** `UI/CommandPanel.lua` — `InsertAtCursor()`
+
+Current `InsertAtCursor()` blindly inserts without checking the 255-char limit. Add a pre-check:
+```lua
+function MMO:InsertAtCursor(text)
+    local eb = _G["MacroPlusEditBox"]
+    if not eb or not eb:IsEnabled() then return end
+    local currentLen = strlenutf8(eb:GetText())
+    local insertLen = strlenutf8(text)
+    if currentLen + insertLen > 255 then
+        print("|cff00ccff[MacroPlus]|r Not enough space. Command needs "
+              .. insertLen .. " chars (" .. (255 - currentLen) .. " available).")
+        return
+    end
+    eb:SetFocus()
+    eb:Insert(text)
+end
+```
+
+#### 5E-2: Auto-Append Newline for Special Scripts
+**File:** `UI/CommandPanel.lua` — `RenderSpecialContent()` OnClick handler
+
+Special scripts are complete macro lines. After inserting, append `\n` if room:
+```lua
+btn:SetScript("OnClick", function()
+    local script = item.script
+    local eb = _G["MacroPlusEditBox"]
+    if eb then
+        local remaining = 255 - strlenutf8(eb:GetText())
+        if strlenutf8(script) + 1 <= remaining then
+            script = script .. "\n"
+        end
+    end
+    MMO:InsertAtCursor(script)
+end)
+```
+
+#### 5E-3: Localized Equipment Slot Names
+**File:** `Data/SpecialCommands.lua` — `MMO.EquipmentSlots`
+
+Replace hardcoded English strings with WoW's built-in `_G.INVTYPE_*` globals for automatic localization:
+```lua
+MMO.EquipmentSlots = {
+    { name = _G.INVTYPE_HEAD,                                slotNum = 1 },
+    { name = _G.INVTYPE_NECK,                                slotNum = 2 },
+    { name = _G.INVTYPE_SHOULDER,                            slotNum = 3 },
+    { name = _G.INVTYPE_BODY,                                slotNum = 4 },
+    { name = _G.INVTYPE_CHEST,                               slotNum = 5 },
+    { name = _G.INVTYPE_WAIST,                               slotNum = 6 },
+    { name = _G.INVTYPE_LEGS,                                slotNum = 7 },
+    { name = _G.INVTYPE_FEET,                                slotNum = 8 },
+    { name = _G.INVTYPE_WRIST,                               slotNum = 9 },
+    { name = _G.INVTYPE_HAND,                                slotNum = 10 },
+    { name = format("%s 1", _G.INVTYPE_FINGER),              slotNum = 11 },
+    { name = format("%s 2", _G.INVTYPE_FINGER),              slotNum = 12 },
+    { name = format("%s 1", _G.INVTYPE_TRINKET),             slotNum = 13 },
+    { name = format("%s 2", _G.INVTYPE_TRINKET),             slotNum = 14 },
+    { name = _G.INVTYPE_CLOAK,                               slotNum = 15 },
+    { name = _G.INVTYPE_WEAPONMAINHAND,                      slotNum = 16 },
+    { name = _G.INVTYPE_WEAPONOFFHAND,                       slotNum = 17 },
+    { name = _G.INVTYPE_RANGED or "Ranged",                  slotNum = 18 },
+    { name = _G.INVTYPE_TABARD,                              slotNum = 19 },
+}
+```
+
+#### 5E-4: Add Missing Special Scripts
+**File:** `Data/SpecialCommands.lua` — `MMO.SpecialScripts`
+
+Add scripts from MacroToolkit that are missing, using Midnight-compatible APIs and self-contained `/run` snippets. Also add a `desc` field for human-readable tooltips:
+```lua
+-- Add to existing table:
+{ name = "Random mount",       script = "/run C_MountJournal.SummonByID(0)",
+  desc = "Summon a random favourite mount" },
+{ name = "Eject passenger",   script = "/run for s=1,2 do if CanEjectPassengerFromSeat(s) then EjectPassengerFromSeat(s) end end",
+  desc = "Eject passengers from your vehicle" },
+{ name = "Cancel form",       script = "/cancelform",
+  desc = "Cancel current shapeshift/stance form" },
+{ name = "Toggle auto-loot",  script = '/run SetCVar("autoLootDefault",1-GetCVar("autoLootDefault"))',
+  desc = "Toggle automatic looting on/off" },
+{ name = "Reload UI",         script = "/reload",
+  desc = "Reload the user interface" },
+```
+
+Also add `desc` field to all existing entries for better tooltips (currently tooltip shows raw script text).
+
+Update deprecated scripts:
+- **Toggle cloak/helm**: `ShowCloak()`/`ShowHelm()` are removed in Midnight. Research `C_Transmog` alternative or remove these entries.
+
+#### 5E-5: Tooltip Improvements for Special Scripts
+**File:** `UI/CommandPanel.lua` — `RenderSpecialContent()` tooltip handler
+
+Currently the tooltip shows the raw `/run` script text. Change to show:
+- **Line 1:** Script name (title color)
+- **Line 2:** Human-readable description (from new `desc` field)
+- **Line 3:** Blank separator
+- **Line 4:** "Inserts:" label
+- **Line 5:** The actual script text (gold, word-wrapped)
+- **Line 6:** Character count: "Length: X characters"
+
+```lua
+btn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(item.name, 0.4, 0.8, 1)
+    if item.desc then
+        GameTooltip:AddLine(item.desc, 1, 1, 1, true)
+    end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine("Inserts:", 0.5, 0.8, 0.5)
+    GameTooltip:AddLine(item.script, 1, 0.82, 0, true)
+    GameTooltip:AddLine("Length: " .. #item.script .. " characters", 0.6, 0.6, 0.6)
+    GameTooltip:Show()
+end)
+```
+
+#### 5E-6: Equipment Slot Tooltip — Show Equipped Item
+**File:** `UI/CommandPanel.lua` — `RenderSlotsContent()` tooltip handler
+
+Enhance slot tooltips to show what item the player currently has equipped in that slot:
+```lua
+btn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(slot.name, 0.4, 0.8, 1)
+    GameTooltip:AddLine("Slot " .. slot.slotNum .. "  →  /use " .. slot.slotNum, 1, 1, 1)
+    local itemLink = GetInventoryItemLink("player", slot.slotNum)
+    if itemLink then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Equipped: " .. itemLink, 0.7, 0.7, 0.7)
+    end
+    GameTooltip:Show()
+end)
+```
+
+#### 5E-7: Raid Markers — Insert as `/tm` Command
+**File:** `UI/CommandPanel.lua` — `RenderMarkersContent()` OnClick handler
+
+Currently markers insert the chat token (e.g. `{skull}`). More useful would be to also offer the `/tm` (targetmarker) syntax. Add a tooltip showing both options, and default click inserts `/tm 8` (the numeric marker ID for use in macros like `/tm 8` to skull the target).
+
+#### Summary of 5E Changes
+
+| Sub-step | File(s) | Change |
+|----------|---------|--------|
+| 5E-1 | CommandPanel.lua | 255-char limit pre-check in `InsertAtCursor()` |
+| 5E-2 | CommandPanel.lua | Auto-append `\n` for special script insertions |
+| 5E-3 | SpecialCommands.lua | Localized slot names via `_G.INVTYPE_*` |
+| 5E-4 | SpecialCommands.lua | Add 5 missing scripts + `desc` field + deprecation cleanup |
+| 5E-5 | CommandPanel.lua | Improved special script tooltips with description + char count |
+| 5E-6 | CommandPanel.lua | Slot tooltips show currently equipped item |
+| 5E-7 | CommandPanel.lua | Raid markers insert `/tm N` command by default |
 
 ---
 
