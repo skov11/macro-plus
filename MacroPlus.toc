@@ -2,7 +2,8 @@
 ## Title: MacroPlus
 ## Notes: Cross-character macro library with IDE-style editor and slash-command encyclopedia
 ## Author: Big-Bro-Bot
-## Version: 0.1.0
+## Version: @project-version@
+## X-Curse-Project-ID: REPLACE_WITH_YOUR_PROJECT_ID
 ## SavedVariables: MMO_GlobalDB
 
 Core\Init.lua

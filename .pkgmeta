@@ -1,0 +1,21 @@
+package-as: MacroPlus
+
+ignore:
+  - .github
+  - .gitignore
+  - .gitattributes
+  - .env
+  - .env-example
+  - .pkgmeta
+  - .claude
+  - CLAUDE.md
+  - README.md
+  - LICENSE
+  - deploy.sh
+  - logo.png
+  - generate_logo.py
+  - docs
+  - scrape
+  - screenshots
+  - gemini
+  - research
