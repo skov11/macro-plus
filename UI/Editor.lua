@@ -87,17 +87,329 @@ end
 
 -- ─── Icon Picker ───────────────────────────────────────────────────────
 
-local PICKER_ICONS_PER_ROW = 10
 local PICKER_ICON_SIZE = 36
 local PICKER_ICON_PAD = 2
+local PICKER_INSET_LEFT = 16
+local PICKER_INSET_RIGHT = 36  -- includes scrollbar
+local PICKER_INSET_TOP = 88    -- title + tabs + search row
+local PICKER_INSET_BOTTOM = 50
+local PICKER_DEFAULT_COLS = 10
+local PICKER_MIN_WIDTH = 300
+local PICKER_MIN_HEIGHT = 350
+local PICKER_CELL = PICKER_ICON_SIZE + PICKER_ICON_PAD
+local QUESTION_MARK_FILEID = 134400
+local PICKER_MAX_RECENT = 20
+
+-- Categorized icon data (gathered once per session)
+local pickerSpellIcons = {}   -- { {fileID=num, name=str}, ... } (searchable)
+local pickerMacroIcons = {}   -- { fileID, ... }
+local pickerItemIcons = {}    -- { fileID, ... }
+local pickerRecentIcons = {}  -- { fileID, ... } (last N selected, session only)
+local pickerDataCached = false
+
+-- Active display state
+local pickerIcons = {}        -- flat fileID array the virtual scroller renders
+local pickerActiveTab = "spells"
+local pickerSearchText = ""
+local pickerButtons = {}      -- recycled button pool
+
+-- Favorites (persisted to SavedVariables via MMO.db.favoriteIcons)
+local function GetFavorites()
+    if MMO.db then
+        MMO.db.favoriteIcons = MMO.db.favoriteIcons or {}
+        return MMO.db.favoriteIcons
+    end
+    return {}
+end
+
+local function IsFavorite(fileID)
+    return GetFavorites()[fileID] == true
+end
+
+local function ToggleFavorite(fileID)
+    if not fileID or fileID == QUESTION_MARK_FILEID then return end
+    local favs = GetFavorites()
+    if favs[fileID] then
+        favs[fileID] = nil
+    else
+        favs[fileID] = true
+    end
+end
+
+local function GetPickerColsForWidth(frameWidth)
+    local usable = frameWidth - PICKER_INSET_LEFT - PICKER_INSET_RIGHT
+    return math.max(1, math.floor(usable / PICKER_CELL))
+end
+
+-- ─── Icon Gathering (split by category) ─────────────────────────────
+
+local function GatherIconData()
+    if pickerDataCached then return end
+    wipe(pickerSpellIcons)
+    wipe(pickerMacroIcons)
+    wipe(pickerItemIcons)
+
+    -- Player spell icons (with names for search)
+    if C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines then
+        local seen = {}
+        local numLines = C_SpellBook.GetNumSpellBookSkillLines() or 0
+        for li = 1, numLines do
+            local info = C_SpellBook.GetSpellBookSkillLineInfo(li)
+            if info and not info.shouldHide then
+                for si = info.itemIndexOffset + 1, info.itemIndexOffset + info.numSpellBookItems do
+                    local itemInfo = C_SpellBook.GetSpellBookItemInfo(si, Enum.SpellBookSpellBank.Player)
+                    if itemInfo and not itemInfo.isOffSpec
+                       and itemInfo.itemType ~= Enum.SpellBookItemType.FutureSpell then
+                        local fileID = itemInfo.iconID
+                        local name = itemInfo.name or ""
+                        if fileID and not seen[fileID] then
+                            seen[fileID] = true
+                            pickerSpellIcons[#pickerSpellIcons + 1] = { fileID = fileID, name = name }
+                        end
+                        -- Expand flyouts
+                        if itemInfo.itemType == Enum.SpellBookItemType.Flyout and itemInfo.actionID then
+                            local _, _, numSlots, isKnown = GetFlyoutInfo(itemInfo.actionID)
+                            if isKnown and numSlots then
+                                for k = 1, numSlots do
+                                    local spellID, _, isSlotKnown, spellName = GetFlyoutSlotInfo(itemInfo.actionID, k)
+                                    if isSlotKnown and spellID and C_Spell and C_Spell.GetSpellTexture then
+                                        local fid = C_Spell.GetSpellTexture(spellID)
+                                        local sName = spellName or (C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or ""
+                                        if fid and not seen[fid] then
+                                            seen[fid] = true
+                                            pickerSpellIcons[#pickerSpellIcons + 1] = { fileID = fid, name = sName }
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Macro icons (~5000-6000)
+    local macroTable = {}
+    GetMacroIcons(macroTable)
+    for _, icon in ipairs(macroTable) do
+        if type(icon) == "number" then
+            pickerMacroIcons[#pickerMacroIcons + 1] = icon
+        end
+    end
+
+    -- Item icons (~25000-30000)
+    local itemTable = {}
+    GetMacroItemIcons(itemTable)
+    for _, icon in ipairs(itemTable) do
+        if type(icon) == "number" then
+            pickerItemIcons[#pickerItemIcons + 1] = icon
+        end
+    end
+
+    pickerDataCached = true
+end
+
+-- ─── Filter icons into pickerIcons based on active tab + search ─────
+
+local function FilterPickerIcons()
+    wipe(pickerIcons)
+
+    -- Question mark always first
+    pickerIcons[1] = QUESTION_MARK_FILEID
+
+    if pickerActiveTab == "favorites" then
+        local favs = GetFavorites()
+        for fileID, _ in pairs(favs) do
+            pickerIcons[#pickerIcons + 1] = fileID
+        end
+    elseif pickerActiveTab == "recent" then
+        for _, fid in ipairs(pickerRecentIcons) do
+            pickerIcons[#pickerIcons + 1] = fid
+        end
+    elseif pickerActiveTab == "spells" then
+        local query = pickerSearchText:lower()
+        for _, entry in ipairs(pickerSpellIcons) do
+            if query == "" or entry.name:lower():find(query, 1, true) then
+                pickerIcons[#pickerIcons + 1] = entry.fileID
+            end
+        end
+    elseif pickerActiveTab == "icons" then
+        for _, fid in ipairs(pickerMacroIcons) do
+            pickerIcons[#pickerIcons + 1] = fid
+        end
+    elseif pickerActiveTab == "items" then
+        for _, fid in ipairs(pickerItemIcons) do
+            pickerIcons[#pickerIcons + 1] = fid
+        end
+    end
+end
+
+-- ─── Track recently used icons ──────────────────────────────────────
+
+local function RecordRecentIcon(fileID)
+    if not fileID or fileID == QUESTION_MARK_FILEID then return end
+    -- Remove if already present
+    for i = #pickerRecentIcons, 1, -1 do
+        if pickerRecentIcons[i] == fileID then
+            table.remove(pickerRecentIcons, i)
+        end
+    end
+    -- Insert at front
+    table.insert(pickerRecentIcons, 1, fileID)
+    -- Trim to max
+    while #pickerRecentIcons > PICKER_MAX_RECENT do
+        pickerRecentIcons[#pickerRecentIcons] = nil
+    end
+end
+
+-- ─── Virtual Scroll — only render visible rows ─────────────────────
+
+local RefreshIconPicker  -- forward declaration (defined below UpdatePickerScroll)
+
+local function UpdatePickerScroll()
+    local f = iconPickerFrame
+    if not f or not f:IsShown() then return end
+    local sf = f.scrollFrame
+    local sc = f.scrollChild
+    local cols = GetPickerColsForWidth(f:GetWidth())
+    local totalRows = math.ceil(#pickerIcons / cols)
+
+    local totalHeight = totalRows * PICKER_CELL
+    sc:SetWidth(cols * PICKER_CELL - PICKER_ICON_PAD)
+    sc:SetHeight(math.max(1, totalHeight))
+
+    local scrollOffset = sf:GetVerticalScroll() or 0
+    local visibleHeight = sf:GetHeight() or 0
+    local firstVisibleRow = math.max(0, math.floor(scrollOffset / PICKER_CELL) - 1)
+    local lastVisibleRow = math.min(totalRows - 1, math.ceil((scrollOffset + visibleHeight) / PICKER_CELL) + 1)
+
+    local visibleCount = (lastVisibleRow - firstVisibleRow + 1) * cols
+
+    -- Grow button pool as needed
+    while #pickerButtons < visibleCount do
+        local btn = CreateFrame("Button", nil, sc)
+        btn:SetSize(PICKER_ICON_SIZE, PICKER_ICON_SIZE)
+
+        local tex = btn:CreateTexture(nil, "BACKGROUND")
+        tex:SetAllPoints()
+        btn.iconTex = tex
+
+        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.3)
+
+        -- Star overlay for favorites (12x12, top-right corner)
+        local starTex = btn:CreateTexture(nil, "OVERLAY")
+        starTex:SetSize(12, 12)
+        starTex:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -1, -1)
+        starTex:SetTexture("Interface\\COMMON\\FavoritesIcon")
+        starTex:SetVertexColor(1, 0.82, 0)  -- gold tint
+        starTex:Hide()
+        btn.starTex = starTex
+
+        -- Register for both left and right click
+        btn:RegisterForClicks("AnyUp")
+
+        btn:SetScript("OnClick", function(self, button)
+            if not self.iconID then return end
+            if button == "RightButton" then
+                -- Right-click: toggle favorite
+                ToggleFavorite(self.iconID)
+                if pickerActiveTab == "favorites" then
+                    -- Refresh the full list since the icon set changed
+                    RefreshIconPicker()
+                else
+                    -- Just refresh star overlays
+                    UpdatePickerScroll()
+                end
+            else
+                -- Left-click: select icon and close picker
+                selectedIcon = self.iconID
+                headerIcon:SetTexture(self.iconID)
+                RecordRecentIcon(self.iconID)
+                iconPickerFrame:Hide()
+            end
+        end)
+
+        btn:SetScript("OnEnter", function(self)
+            if not self.iconID then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            if IsFavorite(self.iconID) then
+                GameTooltip:SetText("Right-click to unfavorite", 1, 0.82, 0)
+            else
+                GameTooltip:SetText("Right-click to favorite", 0.7, 0.7, 0.7)
+            end
+            GameTooltip:Show()
+        end)
+
+        btn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+
+        pickerButtons[#pickerButtons + 1] = btn
+    end
+
+    for _, btn in ipairs(pickerButtons) do btn:Hide() end
+
+    local btnIndex = 0
+    for row = firstVisibleRow, lastVisibleRow do
+        for col = 0, cols - 1 do
+            local dataIndex = row * cols + col + 1
+            if dataIndex > #pickerIcons then break end
+            btnIndex = btnIndex + 1
+            local btn = pickerButtons[btnIndex]
+            local iconID = pickerIcons[dataIndex]
+            btn.iconID = iconID
+            btn.iconTex:SetTexture(iconID)
+            -- Show/hide star overlay based on favorite status
+            if btn.starTex then
+                btn.starTex:SetShown(IsFavorite(iconID))
+            end
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", sc, "TOPLEFT", col * PICKER_CELL, -(row * PICKER_CELL))
+            btn:SetParent(sc)
+            btn:Show()
+        end
+    end
+end
+
+-- ─── Refresh: filter + scroll ───────────────────────────────────────
+
+RefreshIconPicker = function()
+    FilterPickerIcons()
+    if iconPickerFrame and iconPickerFrame.scrollFrame then
+        iconPickerFrame.scrollFrame:SetVerticalScroll(0)
+    end
+    UpdatePickerScroll()
+end
+
+-- ─── Tab styling helper ─────────────────────────────────────────────
+
+local pickerTabButtons = {}
+
+local function UpdatePickerTabHighlights()
+    for key, btn in pairs(pickerTabButtons) do
+        if key == pickerActiveTab then
+            btn:GetFontString():SetTextColor(1, 0.82, 0)
+        else
+            btn:GetFontString():SetTextColor(0.7, 0.7, 0.7)
+        end
+    end
+end
+
+-- ─── Create / Populate / Show ───────────────────────────────────────
 
 local function CreateIconPicker()
+    local defaultWidth = PICKER_INSET_LEFT + PICKER_INSET_RIGHT + PICKER_DEFAULT_COLS * PICKER_CELL
     local f = CreateFrame("Frame", "MacroPlusIconPicker", UIParent, "BackdropTemplate")
-    f:SetSize(400, 440)
+    f:SetSize(defaultWidth, 500)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:EnableMouse(true)
     f:SetMovable(true)
+    f:SetResizable(true)
+    f:SetResizeBounds(PICKER_MIN_WIDTH, PICKER_MIN_HEIGHT)
     f:Hide()
 
     f:SetBackdrop({
@@ -122,33 +434,138 @@ local function CreateIconPicker()
     f:SetScript("OnMouseDown", function(self) self:StartMoving() end)
     f:SetScript("OnMouseUp", function(self) self:StopMovingOrSizing() end)
 
-    -- Scroll frame for icon grid
+    -- Resize grip
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -6, 6)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    grip:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
+
+    -- ─── Tab buttons (below title) ──────────────────────────────────
+    local tabs = {
+        { key = "favorites", label = "Favorites" },
+        { key = "recent", label = "Recent" },
+        { key = "spells", label = "My Spells" },
+        { key = "icons",  label = "Icons" },
+        { key = "items",  label = "Items" },
+    }
+    local tabX = PICKER_INSET_LEFT
+    for _, tabDef in ipairs(tabs) do
+        local tb = CreateFrame("Button", nil, f)
+        tb:SetHeight(20)
+        tb:SetPoint("TOPLEFT", tabX, -36)
+        local tLabel = tb:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tLabel:SetPoint("LEFT", 0, 0)
+        tLabel:SetText(tabDef.label)
+        tb:SetFontString(tLabel)
+        tb:SetWidth(tLabel:GetStringWidth() + 12)
+
+        local underline = tb:CreateTexture(nil, "ARTWORK")
+        underline:SetHeight(1)
+        underline:SetPoint("BOTTOMLEFT", tLabel, "BOTTOMLEFT", 0, -2)
+        underline:SetPoint("BOTTOMRIGHT", tLabel, "BOTTOMRIGHT", 0, -2)
+        underline:SetColorTexture(1, 0.82, 0, 0.6)
+        tb.underline = underline
+
+        tb:SetScript("OnClick", function()
+            pickerActiveTab = tabDef.key
+            pickerSearchText = ""
+            if f.searchBox then f.searchBox:SetText("") end
+            -- Show/hide search box based on tab
+            if f.searchBox then
+                f.searchBox:SetShown(tabDef.key == "spells")
+            end
+            UpdatePickerTabHighlights()
+            RefreshIconPicker()
+        end)
+
+        tb:SetScript("OnEnter", function(self)
+            if tabDef.key ~= pickerActiveTab then
+                self:GetFontString():SetTextColor(1, 1, 1)
+            end
+        end)
+        tb:SetScript("OnLeave", function()
+            UpdatePickerTabHighlights()
+        end)
+
+        pickerTabButtons[tabDef.key] = tb
+        tabX = tabX + tb:GetWidth() + 6
+    end
+
+    -- ─── Search box (visible on "My Spells" tab) ───────────────────
+    local searchBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    searchBox:SetSize(defaultWidth - PICKER_INSET_LEFT - PICKER_INSET_RIGHT, 20)
+    searchBox:SetPoint("TOPLEFT", PICKER_INSET_LEFT + 2, -60)
+    searchBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PICKER_INSET_RIGHT + 2), -60)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetFontObject(ChatFontSmall)
+    searchBox:SetMaxLetters(40)
+
+    local placeholder = searchBox:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    placeholder:SetPoint("LEFT", 6, 0)
+    placeholder:SetText("Search spells...")
+    searchBox.placeholder = placeholder
+
+    searchBox:SetScript("OnTextChanged", function(self, userInput)
+        local text = self:GetText()
+        placeholder:SetShown(text == "")
+        if userInput then
+            pickerSearchText = text
+            RefreshIconPicker()
+        end
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+    end)
+
+    f.searchBox = searchBox
+
+    -- ─── Scroll frame ───────────────────────────────────────────────
     local sf = CreateFrame("ScrollFrame", "MacroPlusIconPickerScroll", f, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", 16, -40)
-    sf:SetPoint("BOTTOMRIGHT", -36, 50)
+    sf:SetPoint("TOPLEFT", PICKER_INSET_LEFT, -PICKER_INSET_TOP)
+    sf:SetPoint("BOTTOMRIGHT", -PICKER_INSET_RIGHT, PICKER_INSET_BOTTOM)
+    f.scrollFrame = sf
 
     local sc = CreateFrame("Frame", nil, sf)
-    sc:SetWidth(sf:GetWidth())
+    sc:SetWidth(sf:GetWidth() or 1)
     sc:SetHeight(1)
     sf:SetScrollChild(sc)
     f.scrollChild = sc
 
-    -- OK button
+    -- Virtual scroll hooks
+    local lastScroll = -1
+    sf:HookScript("OnScrollRangeChanged", function() UpdatePickerScroll() end)
+    sf:HookScript("OnUpdate", function()
+        local cur = sf:GetVerticalScroll() or 0
+        if cur ~= lastScroll then
+            lastScroll = cur
+            UpdatePickerScroll()
+        end
+    end)
+
+    f:SetScript("OnSizeChanged", function()
+        -- Re-anchor search box width on resize
+        searchBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PICKER_INSET_RIGHT + 2), -60)
+        UpdatePickerScroll()
+    end)
+    f:SetScript("OnShow", function() UpdatePickerScroll() end)
+
+    -- ─── Bottom buttons ─────────────────────────────────────────────
     local okBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     okBtn:SetSize(80, 22)
     okBtn:SetPoint("BOTTOMRIGHT", -90, 16)
     okBtn:SetText("Okay")
-    okBtn:SetScript("OnClick", function()
-        f:Hide()
-    end)
+    okBtn:SetScript("OnClick", function() f:Hide() end)
 
-    -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     cancelBtn:SetSize(80, 22)
     cancelBtn:SetPoint("BOTTOMRIGHT", -12, 16)
     cancelBtn:SetText("Cancel")
     cancelBtn:SetScript("OnClick", function()
-        -- Revert to original icon
         if currentMacro then
             selectedIcon = currentMacro.icon
             local tex = selectedIcon
@@ -167,60 +584,21 @@ local function CreateIconPicker()
     return f
 end
 
-local function PopulateIconPicker()
-    local f = iconPickerFrame
-    local sc = f.scrollChild
-
-    -- Clear previous icons
-    for _, child in ipairs({sc:GetChildren()}) do
-        child:Hide()
-        child:SetParent(nil)
-    end
-
-    -- Gather icons from WoW API
-    local icons = {}
-    local macroIcons = GetMacroIcons()
-    if macroIcons then
-        for i = 1, #macroIcons do
-            icons[#icons + 1] = macroIcons[i]
-            if #icons >= 500 then break end  -- limit for performance
-        end
-    end
-
-    -- Layout in grid
-    for i = 1, #icons do
-        local iconID = icons[i]
-        local btn = CreateFrame("Button", nil, sc)
-        btn:SetSize(PICKER_ICON_SIZE, PICKER_ICON_SIZE)
-
-        local col = (i - 1) % PICKER_ICONS_PER_ROW
-        local row = math.floor((i - 1) / PICKER_ICONS_PER_ROW)
-        btn:SetPoint("TOPLEFT", col * (PICKER_ICON_SIZE + PICKER_ICON_PAD), -row * (PICKER_ICON_SIZE + PICKER_ICON_PAD))
-
-        btn:SetNormalTexture(iconID)
-
-        -- Highlight on hover
-        local hl = btn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.3)
-
-        btn:SetScript("OnClick", function()
-            selectedIcon = iconID
-            headerIcon:SetTexture(iconID)
-            iconPickerFrame:Hide()
-        end)
-    end
-
-    local numRows = math.ceil(#icons / PICKER_ICONS_PER_ROW)
-    sc:SetHeight(numRows * (PICKER_ICON_SIZE + PICKER_ICON_PAD))
-end
-
 local function ShowIconPicker()
     if not iconPickerFrame then
         CreateIconPicker()
     end
-    PopulateIconPicker()
+    -- Invalidate data so spell icons refresh on spec/talent changes
+    pickerDataCached = false
+    GatherIconData()
+    -- Default to "My Spells" tab with search visible
+    pickerActiveTab = "spells"
+    pickerSearchText = ""
+    iconPickerFrame.searchBox:SetText("")
+    iconPickerFrame.searchBox:Show()
+    UpdatePickerTabHighlights()
     iconPickerFrame:Show()
+    RefreshIconPicker()
 end
 
 -- ─── Dropdown Helper ──────────────────────────────────────────────────
