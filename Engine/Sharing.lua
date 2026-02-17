@@ -3,6 +3,11 @@ local _, MMO = ...
 local PREFIX = "MPLUS"
 local CHUNK_SIZE = 245
 local REASSEMBLY_TIMEOUT = 30
+local MAX_CHUNKS = 20            -- max chunk count per message
+local MAX_CONCURRENT_BUFFERS = 5 -- max simultaneous reassembly buffers
+local MAX_PAYLOAD_BYTES = 4096   -- max reassembled payload size in bytes
+local MAX_MACRO_NAME = 16        -- WoW macro name limit
+local MAX_MACRO_BODY = 255       -- WoW macro body limit
 
 -- ─── Reassembly Buffer ──────────────────────────────────────────────
 
@@ -122,9 +127,19 @@ local function ProcessIncoming(senderKey, senderDisplay, message)
     local idx = tonumber(idxStr)
     if not total or not idx or total < 1 or idx < 1 or idx > total then return end
 
+    -- Reject messages declaring too many chunks
+    if total > MAX_CHUNKS then return end
+
     -- Get or create buffer
     local buf = reassemblyBuffers[senderKey]
     if not buf then
+        -- Reject if too many concurrent reassembly buffers are active
+        local bufferCount = 0
+        for _ in pairs(reassemblyBuffers) do
+            bufferCount = bufferCount + 1
+        end
+        if bufferCount >= MAX_CONCURRENT_BUFFERS then return end
+
         buf = {
             total = total,
             chunks = {},
@@ -162,6 +177,12 @@ local function ProcessIncoming(senderKey, senderDisplay, message)
     -- Clean up buffer
     ClearBuffer(senderKey)
 
+    -- Reject oversized payloads
+    if #fullPayload > MAX_PAYLOAD_BYTES then
+        print("|cff00ccff[MacroPlus]|r Rejected oversized macro data from " .. senderDisplay .. ".")
+        return
+    end
+
     -- Deserialize
     local macros, err = MMO:DeserializeMacros(fullPayload)
     if not macros or #macros == 0 then
@@ -171,6 +192,14 @@ local function ProcessIncoming(senderKey, senderDisplay, message)
 
     -- Show accept/decline dialog for the first macro
     local macro = macros[1]
+    if macro then
+        if macro.name and #macro.name > MAX_MACRO_NAME then
+            macro.name = macro.name:sub(1, MAX_MACRO_NAME)
+        end
+        if macro.body and #macro.body > MAX_MACRO_BODY then
+            macro.body = macro.body:sub(1, MAX_MACRO_BODY)
+        end
+    end
     if MMO.ShowAcceptDialog then
         MMO:ShowAcceptDialog(senderDisplay, macro)
     end
